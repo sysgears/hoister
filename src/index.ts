@@ -30,6 +30,8 @@ export type Graph = {
   packageType?: PackageType;
 };
 
+const EMPTY_MAP = new Map();
+
 const decoupleNode = (graph: Graph): Graph => {
   if (graph['__decoupled']) return graph;
 
@@ -183,6 +185,17 @@ const hoistDependency = (
       if (hoistQueue && !rootDep && !isDepTurn) {
         hoistQueue[depPriorityDepth].push(graphPath.map((x) => x.id));
         break;
+      }
+
+      if (isHoistable) {
+        for (const [hoistedName, hoistedTo] of dep.hoistedTo || EMPTY_MAP) {
+          const originalId = hoistedTo.dependencies.get(hoistedName);
+          let availableId: PackageId | undefined = undefined;
+          for (let idx = 0; idx < rootPkgIdx; idx++) {
+            availableId = graphPath[idx].dependencies?.get(hoistedName)?.id;
+          }
+          isHoistable = availableId === originalId;
+        }
       }
     }
 

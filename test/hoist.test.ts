@@ -292,6 +292,32 @@ describe('hoist', () => {
         { id: 'F', dependencies: [{ id: 'C@Y' }] },
       ],
     };
-    hoist(graph as Package, { dump: true });
+
+    const hoistedGraph = {
+      id: '.',
+      dependencies: [
+        {
+          id: 'A',
+          dependencies: [
+            {
+              id: 'B@X',
+              dependencies: [
+                {
+                  id: 'C@X',
+                },
+              ],
+            },
+            { id: 'D@Y' },
+          ],
+        },
+        { id: 'B@Y' },
+        { id: 'C@Y' },
+        { id: 'D@X' },
+        { id: 'E' },
+        { id: 'F' },
+      ],
+    };
+
+    expect(hoist(graph as Package)).toEqual(hoistedGraph);
   });
 });
