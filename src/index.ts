@@ -1,4 +1,3 @@
-import { traversePackageDependenciesOnce } from './traversal';
 import { traverseDependencies } from './traversal';
 import { getPackageName } from './parse';
 import { getHoistPriorities, HoistPriorities } from './priority';
@@ -63,45 +62,62 @@ const decoupleNode = (graph: Graph): Graph => {
   return clone;
 };
 
-export const toGraph = (pkg: Package): Graph => {
+export const toGraph = (rootPkg: Package): Graph => {
   const graph: Graph = {
-    id: pkg.id,
+    id: rootPkg.id,
   };
 
-  traversePackageDependenciesOnce(
-    (graphPath, context, isWorkspace) => {
-      const pkg = graphPath[graphPath.length - 1];
-      const newPkg = graphPath.length === 1 ? graph : context.graphPathPkgs.get(pkg.id) || { id: pkg.id };
+  const seen = new Set<Package>();
 
-      if (pkg.packageType) {
-        newPkg.packageType = pkg.packageType;
+  const visitDependency = (
+    pkg: Package,
+    parentNode: Graph,
+    parentNodes: Map<PackageId, Graph>,
+    { isWorkspaceDep }: { isWorkspaceDep: boolean }
+  ) => {
+    const isSeen = seen.has(pkg);
+    const newNode = pkg === rootPkg ? graph : parentNodes.get(pkg.id) || { id: pkg.id };
+    seen.add(pkg);
+
+    if (pkg.packageType) {
+      newNode.packageType = pkg.packageType;
+    }
+
+    if (pkg.peerNames) {
+      newNode.peerNames = new Set(pkg.peerNames);
+    }
+
+    if (pkg !== rootPkg) {
+      const name = getPackageName(pkg.id);
+      if (isWorkspaceDep) {
+        parentNode.workspaces = parentNode.workspaces || new Map();
+        parentNode.workspaces.set(name, newNode);
+      } else {
+        parentNode.dependencies = parentNode.dependencies || new Map();
+        parentNode.dependencies.set(name, newNode);
+      }
+    }
+
+    if (!isSeen) {
+      const nextParentNodes = new Map([...parentNodes.entries(), [pkg.id, newNode]]);
+      for (const workspaceDep of pkg.workspaces || []) {
+        visitDependency(workspaceDep, newNode, nextParentNodes, { isWorkspaceDep: true });
       }
 
-      if (pkg.peerNames) {
-        newPkg.peerNames = new Set(pkg.peerNames);
+      for (const dep of pkg.dependencies || []) {
+        visitDependency(dep, newNode, nextParentNodes, { isWorkspaceDep: false });
       }
+    }
+  };
 
-      if (graphPath.length > 1) {
-        const name = getPackageName(pkg.id);
-        const parent = context.parent;
-        if (isWorkspace) {
-          if (!parent.workspaces) {
-            parent.workspaces = new Map();
-          }
-          parent.workspaces.set(name, newPkg);
-        } else {
-          if (!parent.dependencies) {
-            parent.dependencies = new Map();
-          }
-          parent.dependencies.set(name, newPkg);
-        }
-      }
+  visitDependency(rootPkg, graph, new Map(), { isWorkspaceDep: true });
 
-      return { parent: newPkg, graphPathPkgs: new Map([...context.graphPathPkgs.entries(), [pkg.id, newPkg]]) };
-    },
-    pkg,
-    { parent: graph, graphPathPkgs: new Map<PackageId, Graph>() }
-  );
+  // console.log(
+  //   'pkg',
+  //   require('util').inspect(rootPkg, false, null),
+  //   'graph',
+  //   require('util').inspect(graph, false, null)
+  // );
 
   return graph;
 };
@@ -109,48 +125,56 @@ export const toGraph = (pkg: Package): Graph => {
 export const toPackage = (graph: Graph): Package => {
   const rootPkg: Package = { id: graph.id };
 
-  traverseDependencies(
-    (graphPath, context) => {
-      const pkg = graphPath[graphPath.length - 1];
-      const newPkg = graphPath.length === 1 ? rootPkg : { id: pkg.id };
+  const visitDependency = (graphPath: Graph[], parentPkg: Package, { isWorkspaceDep }: { isWorkspaceDep: boolean }) => {
+    const node = graphPath[graphPath.length - 1];
+    const newPkg = graphPath.length === 1 ? parentPkg : { id: node.id };
 
-      if (pkg.packageType) {
-        newPkg.packageType = pkg.packageType;
+    if (node.packageType) {
+      newPkg.packageType = node.packageType;
+    }
+
+    if (node.peerNames) {
+      newPkg.peerNames = Array.from(node.peerNames);
+    }
+
+    if (graphPath.length > 1) {
+      if (isWorkspaceDep) {
+        parentPkg.workspaces = parentPkg.workspaces || [];
+        parentPkg.workspaces.push(newPkg);
+      } else {
+        parentPkg.dependencies = parentPkg.dependencies || [];
+        parentPkg.dependencies.push(newPkg);
       }
+    }
 
-      if (pkg.peerNames) {
-        newPkg.peerNames = Array.from(pkg.peerNames);
-      }
+    if (graphPath.indexOf(node) === graphPath.length - 1) {
+      if (node.workspaces) {
+        const sortedEntries = Array.from(node.workspaces.entries()).sort((x1, x2) =>
+          x1[0] === x2[0] ? 0 : x1[0] < x2[0] ? -1 : 1
+        );
 
-      if (graphPath.length > 1) {
-        const parentNode = graphPath[graphPath.length - 2];
-        const depName = getPackageName(newPkg.id);
-        const parentPkg = context.parent;
-        if (parentNode.workspaces) {
-          const parentNodeDep = parentNode.workspaces.get(depName);
-          if (parentNodeDep && parentNodeDep.id === newPkg.id) {
-            if (!parentPkg.workspaces) {
-              parentPkg.workspaces = [];
-            }
-            parentPkg.workspaces.push(newPkg);
-          }
-        }
-        if (parentNode.dependencies) {
-          const parentNodeDep = parentNode.dependencies.get(depName);
-          if (parentNodeDep && parentNodeDep.id === newPkg.id) {
-            if (!parentPkg.dependencies) {
-              parentPkg.dependencies = [];
-            }
-            parentPkg.dependencies.push(newPkg);
-          }
+        for (const [, depWorkspace] of sortedEntries) {
+          graphPath.push(depWorkspace);
+          visitDependency(graphPath, newPkg, { isWorkspaceDep: true });
+          graphPath.pop();
         }
       }
 
-      return { parent: newPkg };
-    },
-    graph,
-    { parent: rootPkg }
-  );
+      if (node.dependencies) {
+        const sortedEntries = Array.from(node.dependencies.entries()).sort((x1, x2) =>
+          x1[0] === x2[0] ? 0 : x1[0] < x2[0] ? -1 : 1
+        );
+
+        for (const [, dep] of sortedEntries) {
+          graphPath.push(dep);
+          visitDependency(graphPath, newPkg, { isWorkspaceDep: false });
+          graphPath.pop();
+        }
+      }
+    }
+  };
+
+  visitDependency([graph], rootPkg, { isWorkspaceDep: true });
 
   return rootPkg;
 };

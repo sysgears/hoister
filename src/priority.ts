@@ -1,6 +1,5 @@
 import { PackageName, PackageId, PackageType, Graph } from '.';
 import { getPackageName } from './parse';
-import { traverseDependenciesOnce, traverseWorkspacesOnce } from './traversal';
 
 export type HoistPriorities = Map<PackageName, PackageId[]>;
 
@@ -12,60 +11,77 @@ export const getHoistPriorities = (graph: Graph): HoistPriorities => {
   let maxWorkspaceLevel = 0;
   const packageMetrics = new Map();
 
-  traverseWorkspacesOnce(
-    (graphPath, context) => {
-      const pkg = graphPath[graphPath.length - 1];
+  const seenWorkspaces = new Set();
 
-      const workspaceLevel = context.workspaceLevel + 1;
-      if (workspaceLevel > maxWorkspaceLevel) {
-        maxWorkspaceLevel = workspaceLevel;
+  const visitWorkspace = (workspace: Graph, workspaceLevel: number) => {
+    if (seenWorkspaces.has(workspace)) return;
+    seenWorkspaces.add(workspace);
+
+    if (workspaceLevel > maxWorkspaceLevel) {
+      maxWorkspaceLevel = workspaceLevel;
+    }
+    workspaceLevels.set(workspace.id, workspaceLevel);
+
+    if (workspace.workspaces) {
+      for (const dep of workspace.workspaces.values()) {
+        visitWorkspace(dep, workspaceLevel + 1);
       }
-      workspaceLevels.set(pkg.id, workspaceLevel);
+    }
+  };
 
-      return { workspaceLevel };
-    },
-    graph,
-    { workspaceLevel: 1 }
-  );
+  visitWorkspace(graph, 1);
 
-  traverseDependenciesOnce(
-    (graphPath, context) => {
-      const pkg = graphPath[graphPath.length - 1];
+  const seen = new Set();
+  const visitDependency = (
+    pkg: Graph,
+    parentPkg: Graph,
+    options: { workspaceLevel: number; isDirectDependency: boolean }
+  ) => {
+    if (seen.has(pkg)) return;
+    seen.add(pkg);
 
-      let metrics = packageMetrics.get(pkg.id);
-      if (!metrics) {
-        metrics = {
-          directDependencyLevel: maxWorkspaceLevel + 1,
-          peerCount: (pkg.peerNames || EMPTY_SET).size,
-          parents: new Set(),
-        };
-        packageMetrics.set(pkg.id, metrics);
+    let metrics = packageMetrics.get(pkg.id);
+    if (!metrics) {
+      metrics = {
+        directDependencyLevel: maxWorkspaceLevel + 1,
+        peerCount: (pkg.peerNames || EMPTY_SET).size,
+        parents: new Set(),
+      };
+      packageMetrics.set(pkg.id, metrics);
+    }
+
+    if (options.isDirectDependency && options.workspaceLevel < metrics.directDependencyLevel) {
+      metrics.directDependencyLevel = options.workspaceLevel;
+    }
+    if (pkg !== graph) {
+      metrics.parents.add(parentPkg);
+    }
+
+    let workspaceLevel, isDirectDependency;
+    const nextWorkspaceLevel = workspaceLevels.get(pkg.id);
+    if (nextWorkspaceLevel) {
+      workspaceLevel = nextWorkspaceLevel;
+      isDirectDependency = true;
+    } else if (pkg.packageType === PackageType.PORTAL) {
+      isDirectDependency = true;
+    } else {
+      isDirectDependency = false;
+    }
+
+    if (pkg.workspaces) {
+      for (const dep of pkg.workspaces.values()) {
+        visitDependency(dep, pkg, { workspaceLevel, isDirectDependency });
       }
+    }
 
-      if (context.isDirectDependency && context.workspaceLevel < metrics.directDependencyLevel) {
-        metrics.directDependencyLevel = context.workspaceLevel;
+    if (pkg.dependencies) {
+      for (const dep of pkg.dependencies.values()) {
+        visitDependency(dep, pkg, { workspaceLevel, isDirectDependency });
       }
-      if (graphPath.length > 1) {
-        metrics.parents.add(graphPath[graphPath.length - 2]);
-      }
+    }
+  };
 
-      const nextContext = { ...context };
-
-      const nextWorkspaceLevel = workspaceLevels.get(pkg.id);
-      if (nextWorkspaceLevel) {
-        nextContext.workspaceLevel = nextWorkspaceLevel;
-        nextContext.isDirectDependency = true;
-      } else if (pkg.packageType === PackageType.PORTAL) {
-        nextContext.isDirectDependency = true;
-      } else {
-        nextContext.isDirectDependency = false;
-      }
-
-      return nextContext;
-    },
-    graph,
-    { workspaceLevel: 1, isDirectDependency: true }
-  );
+  visitDependency(graph, graph, { workspaceLevel: 1, isDirectDependency: true });
 
   const pkgIds = Array.from(packageMetrics.keys());
   pkgIds.sort((id1, id2) => {
