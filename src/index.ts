@@ -1,4 +1,3 @@
-import { traverseDependencies } from './traversal';
 import { getPackageName } from './parse';
 import { getHoistPriorities, HoistPriorities } from './priority';
 
@@ -186,7 +185,8 @@ const hoistDependency = (
   hoistPriorities: HoistPriorities,
   currentPriorityDepth: number,
   hoistQueue?: HoistQueue
-) => {
+): boolean => {
+  let isHoistable = false;
   // console.log(
   //   currentPriorityDepth === 0 ? 'visit' : 'revisit',
   //   graphPath.map((x) => x.id)
@@ -195,7 +195,6 @@ const hoistDependency = (
     let rootPkg = graphPath[rootPkgIdx];
     const dep = graphPath[graphPath.length - 1];
     const depName = getPackageName(dep.id);
-    let isHoistable = false;
     const priorityIds = hoistPriorities.get(depName);
     if (priorityIds) {
       const rootDep = rootPkg.dependencies?.get(depName);
@@ -270,6 +269,8 @@ const hoistDependency = (
       break;
     }
   }
+
+  return isHoistable;
 };
 
 type Options = {
@@ -294,15 +295,44 @@ export const hoist = (pkg: Package, opts?: Options): Package => {
   // console.log('input graph:', require('util').inspect(graph, false, null));
   // console.log('priorities:', require('util').inspect(priorities, false, null));
 
-  traverseDependencies(
-    (graphPath) => {
-      if (graphPath.length > 2) {
-        hoistDependency(graphPath, priorities, priorityDepth, hoistQueue);
+  const visitDependency = (graphPath: Graph[], { isWorkspaceDep }: { isWorkspaceDep: boolean }) => {
+    const node = graphPath[graphPath.length - 1];
+    let isHoisted = false;
+
+    if (!isWorkspaceDep && graphPath.length > 2) {
+      isHoisted = hoistDependency(graphPath, priorities, priorityDepth, hoistQueue);
+    }
+
+    if (!isHoisted && graphPath.indexOf(node) === graphPath.length - 1) {
+      if (node.workspaces) {
+        for (const depWorkspace of node.workspaces.values()) {
+          graphPath.push(depWorkspace);
+          visitDependency(graphPath, { isWorkspaceDep: true });
+          graphPath.pop();
+        }
       }
-    },
-    graph,
-    null
-  );
+
+      if (node.dependencies) {
+        const visitedDepNames = new Set();
+        let anotherPassNeeded;
+        do {
+          anotherPassNeeded = false;
+
+          for (const [depName, dep] of node.dependencies) {
+            if (!visitedDepNames.has(depName)) {
+              anotherPassNeeded = true;
+              graphPath.push(dep);
+              visitDependency(graphPath, { isWorkspaceDep: false });
+              graphPath.pop();
+              visitedDepNames.add(depName);
+            }
+          }
+        } while (anotherPassNeeded);
+      }
+    }
+  };
+
+  visitDependency([graph], { isWorkspaceDep: true });
 
   for (priorityDepth = 1; priorityDepth < maxPriorityDepth; priorityDepth++) {
     for (const graphPathIds of hoistQueue[priorityDepth]) {
