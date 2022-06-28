@@ -178,99 +178,109 @@ export const toPackage = (graph: Graph): Package => {
   return rootPkg;
 };
 
-type HoistQueue = Array<Array<PackageId[]>>;
+type QueueElement = { graphPath: PackageId[]; depName: PackageName };
+type HoistQueue = Array<QueueElement[]>;
 
-const hoistDependency = (
+const hoistDependencies = (
   graphPath: Graph[],
   hoistPriorities: HoistPriorities,
   currentPriorityDepth: number,
+  depNames: Set<PackageName>,
   hoistQueue?: HoistQueue
-): boolean => {
-  let isHoistable = false;
+) => {
+  const parentPkg = graphPath[graphPath.length - 1];
   // console.log(
   //   currentPriorityDepth === 0 ? 'visit' : 'revisit',
-  //   graphPath.map((x) => x.id)
+  //   graphPath.map((x) => x.id),
+  //   depNames
   // );
-  for (let rootPkgIdx = 0; rootPkgIdx < graphPath.length - 2; rootPkgIdx++) {
-    let rootPkg = graphPath[rootPkgIdx];
-    const dep = graphPath[graphPath.length - 1];
-    const depName = getPackageName(dep.id);
-    const priorityIds = hoistPriorities.get(depName);
-    if (priorityIds) {
-      const rootDep = rootPkg.dependencies?.get(depName);
-      const depPriorityDepth = priorityIds.indexOf(dep.id);
-      const isDepTurn = depPriorityDepth === currentPriorityDepth;
-      if (!rootDep) {
-        isHoistable = isDepTurn;
-      } else {
-        isHoistable = rootDep.id === dep.id;
-      }
-      if (hoistQueue && !rootDep && !isDepTurn) {
-        hoistQueue[depPriorityDepth].push(graphPath.map((x) => x.id));
-        break;
-      }
 
-      if (isHoistable) {
-        for (const [hoistedName, hoistedTo] of dep.hoistedTo || EMPTY_MAP) {
-          const originalId = hoistedTo.dependencies.get(hoistedName);
-          let availableId: PackageId | undefined = undefined;
-          for (let idx = 0; idx < rootPkgIdx; idx++) {
-            availableId = graphPath[idx].dependencies?.get(hoistedName)?.id;
-          }
-          isHoistable = availableId === originalId;
-        }
-      }
-    }
+  if (parentPkg.dependencies) {
+    for (const depName of depNames) {
+      const dep = parentPkg.dependencies.get(depName);
+      if (dep) {
+        let isHoistable = false;
+        for (let rootPkgIdx = 0; rootPkgIdx < graphPath.length - 1; rootPkgIdx++) {
+          let rootPkg = graphPath[rootPkgIdx];
+          const priorityIds = hoistPriorities.get(depName);
+          if (priorityIds) {
+            const rootDep = rootPkg.dependencies?.get(depName);
+            const depPriorityDepth = priorityIds.indexOf(dep.id);
+            const isDepTurn = depPriorityDepth === currentPriorityDepth;
+            if (!rootDep) {
+              isHoistable = isDepTurn;
+            } else {
+              isHoistable = rootDep.id === dep.id;
+            }
 
-    if (isHoistable) {
-      for (let idx = 1; idx < graphPath.length - 1; idx++) {
-        const parentPkg = graphPath[idx - 1];
-        const pkg = graphPath[idx];
-        const pkgName = getPackageName(pkg.id);
-        if (!pkg['__decoupled']) {
-          const newPkg = decoupleNode(pkg);
-          graphPath[idx] = newPkg;
-          if (parentPkg.dependencies && parentPkg.dependencies.get(pkgName) === pkg) {
-            parentPkg.dependencies.set(pkgName, newPkg);
-          } else if (parentPkg.workspaces && parentPkg.workspaces.get(pkgName) === pkg) {
-            parentPkg.workspaces.set(pkgName, newPkg);
-          } else {
-            throw new Error(`Assertion: Unable to find decoupled node ${pkg.id} in ${parentPkg.id}`);
+            if (hoistQueue && !rootDep && !isDepTurn) {
+              // console.log('queue', graphPath.map((x) => x.id).concat([dep.id]));
+              hoistQueue[depPriorityDepth].push({ graphPath: graphPath.map((x) => x.id), depName });
+              break;
+            }
+
+            if (isHoistable) {
+              for (const [hoistedName, hoistedTo] of dep.hoistedTo || EMPTY_MAP) {
+                const originalId = hoistedTo.dependencies.get(hoistedName);
+                let availableId: PackageId | undefined = undefined;
+                for (let idx = 0; idx < rootPkgIdx; idx++) {
+                  availableId = graphPath[idx].dependencies?.get(hoistedName)?.id;
+                }
+                isHoistable = availableId === originalId;
+              }
+            }
+          }
+
+          if (isHoistable) {
+            for (let idx = 1; idx < graphPath.length; idx++) {
+              const parentPkg = graphPath[idx - 1];
+              const pkg = graphPath[idx];
+              const pkgName = getPackageName(pkg.id);
+              if (!pkg['__decoupled']) {
+                const newPkg = decoupleNode(pkg);
+                graphPath[idx] = newPkg;
+                if (parentPkg.dependencies && parentPkg.dependencies.get(pkgName) === pkg) {
+                  parentPkg.dependencies.set(pkgName, newPkg);
+                } else if (parentPkg.workspaces && parentPkg.workspaces.get(pkgName) === pkg) {
+                  parentPkg.workspaces.set(pkgName, newPkg);
+                } else {
+                  throw new Error(`Assertion: Unable to find decoupled node ${pkg.id} in ${parentPkg.id}`);
+                }
+              }
+            }
+            rootPkg = graphPath[rootPkgIdx];
+            const parentPkg = graphPath[graphPath.length - 1];
+            if (parentPkg.dependencies) {
+              parentPkg.dependencies.delete(depName);
+              if (parentPkg.dependencies.size === 0) {
+                delete parentPkg.dependencies;
+              }
+              if (!parentPkg.hoistedTo) {
+                parentPkg.hoistedTo = new Map();
+              }
+              parentPkg.hoistedTo.set(depName, rootPkg);
+            }
+            if (!rootPkg.dependencies) {
+              rootPkg.dependencies = new Map();
+            }
+            if (!rootPkg.dependencies.has(depName)) {
+              rootPkg.dependencies.set(depName, dep);
+            }
+            // console.log(
+            //   graphPath.map((x) => x.id),
+            //   'hoist',
+            //   dep.id,
+            //   'into',
+            //   rootPkg.id,
+            //   'result:\n',
+            //   require('util').inspect(graphPath[0], false, null)
+            // );
+            break;
           }
         }
       }
-      rootPkg = graphPath[rootPkgIdx];
-      const parentPkg = graphPath[graphPath.length - 2];
-      if (parentPkg.dependencies) {
-        parentPkg.dependencies.delete(depName);
-        if (parentPkg.dependencies.size === 0) {
-          delete parentPkg.dependencies;
-        }
-        if (!parentPkg.hoistedTo) {
-          parentPkg.hoistedTo = new Map();
-        }
-        parentPkg.hoistedTo.set(depName, rootPkg);
-      }
-      if (!rootPkg.dependencies) {
-        rootPkg.dependencies = new Map();
-      }
-      if (!rootPkg.dependencies.has(depName)) {
-        rootPkg.dependencies.set(depName, dep);
-      }
-      // console.log(
-      //   graphPath.map((x) => x.id),
-      //   'hoist',
-      //   dep.id,
-      //   'into',
-      //   rootPkg.id,
-      //   'result:\n',
-      //   require('util').inspect(graphPath[0], false, null)
-      // );
-      break;
     }
   }
-
-  return isHoistable;
 };
 
 type Options = {
@@ -292,53 +302,41 @@ export const hoist = (pkg: Package, opts?: Options): Package => {
   }
   let priorityDepth = 0;
 
-  // console.log('input graph:', require('util').inspect(graph, false, null));
-  // console.log('priorities:', require('util').inspect(priorities, false, null));
+  const visitParent = (graphPath: Graph[]) => {
+    let node = graphPath[graphPath.length - 1];
 
-  const visitDependency = (graphPath: Graph[], { isWorkspaceDep }: { isWorkspaceDep: boolean }) => {
-    const node = graphPath[graphPath.length - 1];
-    let isHoisted = false;
-
-    if (!isWorkspaceDep && graphPath.length > 2) {
-      isHoisted = hoistDependency(graphPath, priorities, priorityDepth, hoistQueue);
+    if (graphPath.length > 1 && node.dependencies) {
+      hoistDependencies(graphPath, priorities, priorityDepth, new Set(node.dependencies.keys()), hoistQueue);
     }
 
-    if (!isHoisted && graphPath.indexOf(node) === graphPath.length - 1) {
+    node = graphPath[graphPath.length - 1];
+
+    if (graphPath.indexOf(node) === graphPath.length - 1) {
       if (node.workspaces) {
         for (const depWorkspace of node.workspaces.values()) {
           graphPath.push(depWorkspace);
-          visitDependency(graphPath, { isWorkspaceDep: true });
+          visitParent(graphPath);
           graphPath.pop();
         }
       }
 
       if (node.dependencies) {
-        const visitedDepNames = new Set();
-        let anotherPassNeeded;
-        do {
-          anotherPassNeeded = false;
-
-          for (const [depName, dep] of node.dependencies) {
-            if (!visitedDepNames.has(depName)) {
-              anotherPassNeeded = true;
-              graphPath.push(dep);
-              visitDependency(graphPath, { isWorkspaceDep: false });
-              graphPath.pop();
-              visitedDepNames.add(depName);
-            }
-          }
-        } while (anotherPassNeeded);
+        for (const dep of node.dependencies.values()) {
+          graphPath.push(dep);
+          visitParent(graphPath);
+          graphPath.pop();
+        }
       }
     }
   };
 
-  visitDependency([graph], { isWorkspaceDep: true });
+  visitParent([graph]);
 
   for (priorityDepth = 1; priorityDepth < maxPriorityDepth; priorityDepth++) {
-    for (const graphPathIds of hoistQueue[priorityDepth]) {
+    for (const queueElement of hoistQueue[priorityDepth]) {
       const graphPath: Graph[] = [graph];
       let parentPkg = graphPath[graphPath.length - 1];
-      for (const id of graphPathIds.slice(1)) {
+      for (const id of queueElement.graphPath.slice(1)) {
         const name = getPackageName(id);
         const hoistedTo = parentPkg.hoistedTo?.get(name);
         if (hoistedTo && parentPkg.workspaces?.get(name)?.id !== id) {
@@ -370,7 +368,7 @@ export const hoist = (pkg: Package, opts?: Options): Package => {
         }
         parentPkg = graphPath[graphPath.length - 1];
       }
-      hoistDependency(graphPath, priorities, priorityDepth);
+      hoistDependencies(graphPath, priorities, priorityDepth, new Set([queueElement.depName]));
     }
   }
 
