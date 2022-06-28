@@ -232,22 +232,6 @@ const hoistDependencies = (
           }
 
           if (isHoistable) {
-            for (let idx = 1; idx < graphPath.length; idx++) {
-              const parentPkg = graphPath[idx - 1];
-              const pkg = graphPath[idx];
-              const pkgName = getPackageName(pkg.id);
-              if (!pkg['__decoupled']) {
-                const newPkg = decoupleNode(pkg);
-                graphPath[idx] = newPkg;
-                if (parentPkg.dependencies && parentPkg.dependencies.get(pkgName) === pkg) {
-                  parentPkg.dependencies.set(pkgName, newPkg);
-                } else if (parentPkg.workspaces && parentPkg.workspaces.get(pkgName) === pkg) {
-                  parentPkg.workspaces.set(pkgName, newPkg);
-                } else {
-                  throw new Error(`Assertion: Unable to find decoupled node ${pkg.id} in ${parentPkg.id}`);
-                }
-              }
-            }
             rootPkg = graphPath[rootPkgIdx];
             const parentPkg = graphPath[graphPath.length - 1];
             if (parentPkg.dependencies) {
@@ -302,20 +286,37 @@ export const hoist = (pkg: Package, opts?: Options): Package => {
   }
   let priorityDepth = 0;
 
-  const visitParent = (graphPath: Graph[]) => {
+  const visitParent = (graphPath: Graph[], { isWorkspaceDep }: { isWorkspaceDep: boolean }) => {
     let node = graphPath[graphPath.length - 1];
+
+    if (graphPath.length > 1) {
+      const parentPkg = graphPath[graphPath.length - 2];
+      const newPkg = decoupleNode(node);
+      if (newPkg !== node) {
+        node = newPkg;
+        graphPath[graphPath.length - 1] = node;
+        const pkgName = getPackageName(node.id);
+        if (isWorkspaceDep) {
+          if (parentPkg.workspaces) {
+            parentPkg.workspaces.set(pkgName, node);
+          }
+        } else {
+          if (parentPkg.dependencies) {
+            parentPkg.dependencies.set(pkgName, node);
+          }
+        }
+      }
+    }
 
     if (graphPath.length > 1 && node.dependencies) {
       hoistDependencies(graphPath, priorities, priorityDepth, new Set(node.dependencies.keys()), hoistQueue);
     }
 
-    node = graphPath[graphPath.length - 1];
-
     if (graphPath.indexOf(node) === graphPath.length - 1) {
       if (node.workspaces) {
         for (const depWorkspace of node.workspaces.values()) {
           graphPath.push(depWorkspace);
-          visitParent(graphPath);
+          visitParent(graphPath, { isWorkspaceDep: true });
           graphPath.pop();
         }
       }
@@ -323,14 +324,14 @@ export const hoist = (pkg: Package, opts?: Options): Package => {
       if (node.dependencies) {
         for (const dep of node.dependencies.values()) {
           graphPath.push(dep);
-          visitParent(graphPath);
+          visitParent(graphPath, { isWorkspaceDep: false });
           graphPath.pop();
         }
       }
     }
   };
 
-  visitParent([graph]);
+  visitParent([graph], { isWorkspaceDep: true });
 
   for (priorityDepth = 1; priorityDepth < maxPriorityDepth; priorityDepth++) {
     for (const queueElement of hoistQueue[priorityDepth]) {
