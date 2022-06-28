@@ -258,6 +258,46 @@ const getHoistVerdict = (
   }
 };
 
+/**
+ * Gets regular node dependencies only and sorts them in the order so that
+ * peer dependencies come before the dependency that rely on them.
+ *
+ * @param node graph node
+ * @returns sorted regular dependencies
+ */
+const getSortedRegularDependencies = (node: Graph, originalDepNames: Set<PackageName>): Set<PackageName> => {
+  const depNames: Set<PackageName> = new Set();
+
+  const addDep = (depName: PackageName, seenDeps = new Set()) => {
+    if (seenDeps.has(depName)) return;
+    seenDeps.add(depName);
+    const dep = node.dependencies!.get(depName)!;
+
+    if (dep.peerNames) {
+      for (const peerName of dep.peerNames) {
+        if (originalDepNames.has(peerName) && !node.peerNames?.has(peerName)) {
+          const peerDep = node.dependencies!.get(peerName);
+          if (peerDep && !depNames.has(peerName)) {
+            addDep(peerName, seenDeps);
+          }
+        }
+      }
+    }
+
+    depNames.add(depName);
+  };
+
+  if (node.dependencies) {
+    for (const depName of originalDepNames) {
+      if (!node.peerNames?.has(depName)) {
+        addDep(depName);
+      }
+    }
+  }
+
+  return depNames;
+};
+
 const hoistDependencies = (
   graphPath: Graph[],
   hoistPriorities: HoistPriorities,
@@ -271,8 +311,9 @@ const hoistDependencies = (
   //   graphPath.map((x) => x.id),
   //   depNames
   // );
+  const sortedDepNames = getSortedRegularDependencies(parentPkg, depNames);
 
-  for (const depName of depNames) {
+  for (const depName of sortedDepNames) {
     const dep = parentPkg.dependencies!.get(depName)!;
     const verdict = getHoistVerdict(graphPath, depName, hoistPriorities, currentPriorityDepth);
     if (verdict.isHoistable === Hoistable.YES) {
