@@ -181,6 +181,83 @@ export const toPackage = (graph: Graph): Package => {
 type QueueElement = { graphPath: PackageId[]; depName: PackageName };
 type HoistQueue = Array<QueueElement[]>;
 
+enum Hoistable {
+  LATER,
+  YES,
+  NO,
+  DEPENDS,
+}
+
+type HoistVerdict =
+  | {
+      isHoistable: Hoistable.LATER;
+      priorityDepth: number;
+    }
+  | {
+      isHoistable: Hoistable.YES;
+      newParentIndex: number;
+    }
+  | {
+      isHoistable: Hoistable.NO;
+    }
+  | {
+      isHoistable: Hoistable.DEPENDS;
+      dependsOn: Set<Graph>;
+    };
+
+const getHoistVerdict = (
+  graphPath: Graph[],
+  depName: PackageName,
+  hoistPriorities: HoistPriorities,
+  currentPriorityDepth: number
+): HoistVerdict => {
+  const parentPkg = graphPath[graphPath.length - 1];
+  const dep = parentPkg.dependencies!.get(depName)!;
+  const priorityIds = hoistPriorities.get(depName)!;
+  let isHoistable = Hoistable.NO;
+  let priorityDepth;
+  let newParentIndex;
+
+  for (newParentIndex = 0; newParentIndex < graphPath.length - 1; newParentIndex++) {
+    const newParentPkg = graphPath[newParentIndex];
+
+    const newParentDep = newParentPkg.dependencies?.get(depName);
+    priorityDepth = priorityIds.indexOf(dep.id);
+    const isDepTurn = priorityDepth === currentPriorityDepth;
+    if (!newParentDep) {
+      isHoistable = isDepTurn ? Hoistable.YES : Hoistable.LATER;
+    } else {
+      isHoistable = newParentDep.id === dep.id ? Hoistable.YES : Hoistable.NO;
+    }
+
+    if (isHoistable === Hoistable.YES) {
+      for (const [hoistedName, hoistedTo] of dep.hoistedTo || EMPTY_MAP) {
+        const originalId = hoistedTo.dependencies.get(hoistedName);
+        let availableId: PackageId | undefined = undefined;
+        for (let idx = 0; idx < newParentIndex; idx++) {
+          availableId = graphPath[idx].dependencies?.get(hoistedName)?.id;
+        }
+
+        isHoistable = availableId === originalId ? Hoistable.YES : Hoistable.NO;
+
+        if (isHoistable === Hoistable.NO) break;
+      }
+    }
+
+    if (isHoistable === Hoistable.YES) {
+      break;
+    }
+  }
+
+  if (isHoistable === Hoistable.LATER) {
+    return { isHoistable, priorityDepth };
+  } else if (isHoistable === Hoistable.YES) {
+    return { isHoistable, newParentIndex };
+  } else {
+    return { isHoistable };
+  }
+};
+
 const hoistDependencies = (
   graphPath: Graph[],
   hoistPriorities: HoistPriorities,
@@ -195,74 +272,40 @@ const hoistDependencies = (
   //   depNames
   // );
 
-  if (parentPkg.dependencies) {
-    for (const depName of depNames) {
-      const dep = parentPkg.dependencies.get(depName);
-      if (dep) {
-        let isHoistable = false;
-        for (let rootPkgIdx = 0; rootPkgIdx < graphPath.length - 1; rootPkgIdx++) {
-          let rootPkg = graphPath[rootPkgIdx];
-          const priorityIds = hoistPriorities.get(depName);
-          if (priorityIds) {
-            const rootDep = rootPkg.dependencies?.get(depName);
-            const depPriorityDepth = priorityIds.indexOf(dep.id);
-            const isDepTurn = depPriorityDepth === currentPriorityDepth;
-            if (!rootDep) {
-              isHoistable = isDepTurn;
-            } else {
-              isHoistable = rootDep.id === dep.id;
-            }
-
-            if (hoistQueue && !rootDep && !isDepTurn) {
-              // console.log('queue', graphPath.map((x) => x.id).concat([dep.id]));
-              hoistQueue[depPriorityDepth].push({ graphPath: graphPath.map((x) => x.id), depName });
-              break;
-            }
-
-            if (isHoistable) {
-              for (const [hoistedName, hoistedTo] of dep.hoistedTo || EMPTY_MAP) {
-                const originalId = hoistedTo.dependencies.get(hoistedName);
-                let availableId: PackageId | undefined = undefined;
-                for (let idx = 0; idx < rootPkgIdx; idx++) {
-                  availableId = graphPath[idx].dependencies?.get(hoistedName)?.id;
-                }
-                isHoistable = availableId === originalId;
-              }
-            }
-          }
-
-          if (isHoistable) {
-            rootPkg = graphPath[rootPkgIdx];
-            const parentPkg = graphPath[graphPath.length - 1];
-            if (parentPkg.dependencies) {
-              parentPkg.dependencies.delete(depName);
-              if (parentPkg.dependencies.size === 0) {
-                delete parentPkg.dependencies;
-              }
-              if (!parentPkg.hoistedTo) {
-                parentPkg.hoistedTo = new Map();
-              }
-              parentPkg.hoistedTo.set(depName, rootPkg);
-            }
-            if (!rootPkg.dependencies) {
-              rootPkg.dependencies = new Map();
-            }
-            if (!rootPkg.dependencies.has(depName)) {
-              rootPkg.dependencies.set(depName, dep);
-            }
-            // console.log(
-            //   graphPath.map((x) => x.id),
-            //   'hoist',
-            //   dep.id,
-            //   'into',
-            //   rootPkg.id,
-            //   'result:\n',
-            //   require('util').inspect(graphPath[0], false, null)
-            // );
-            break;
-          }
+  for (const depName of depNames) {
+    const dep = parentPkg.dependencies!.get(depName)!;
+    const verdict = getHoistVerdict(graphPath, depName, hoistPriorities, currentPriorityDepth);
+    if (verdict.isHoistable === Hoistable.YES) {
+      const rootPkg = graphPath[verdict.newParentIndex];
+      const parentPkg = graphPath[graphPath.length - 1];
+      if (parentPkg.dependencies) {
+        parentPkg.dependencies.delete(depName);
+        if (parentPkg.dependencies.size === 0) {
+          delete parentPkg.dependencies;
         }
+        if (!parentPkg.hoistedTo) {
+          parentPkg.hoistedTo = new Map();
+        }
+        parentPkg.hoistedTo.set(depName, rootPkg);
       }
+      if (!rootPkg.dependencies) {
+        rootPkg.dependencies = new Map();
+      }
+      if (!rootPkg.dependencies.has(depName)) {
+        rootPkg.dependencies.set(depName, dep);
+      }
+      // console.log(
+      //   graphPath.map((x) => x.id),
+      //   'hoist',
+      //   dep.id,
+      //   'into',
+      //   rootPkg.id,
+      //   'result:\n',
+      //   require('util').inspect(graphPath[0], false, null)
+      // );
+    } else if (verdict.isHoistable === Hoistable.LATER) {
+      // console.log('queue', graphPath.map((x) => x.id).concat([dep.id]));
+      hoistQueue![verdict.priorityDepth].push({ graphPath: graphPath.map((x) => x.id), depName });
     }
   }
 };
@@ -297,13 +340,9 @@ export const hoist = (pkg: Package, opts?: Options): Package => {
         graphPath[graphPath.length - 1] = node;
         const pkgName = getPackageName(node.id);
         if (isWorkspaceDep) {
-          if (parentPkg.workspaces) {
-            parentPkg.workspaces.set(pkgName, node);
-          }
+          parentPkg.workspaces!.set(pkgName, node);
         } else {
-          if (parentPkg.dependencies) {
-            parentPkg.dependencies.set(pkgName, node);
-          }
+          parentPkg.dependencies!.set(pkgName, node);
         }
       }
     }
