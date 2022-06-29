@@ -320,4 +320,69 @@ describe('hoist', () => {
 
     expect(hoist(graph as Package)).toEqual(hoistedGraph);
   });
+
+  it(`should support basic peer dependencies`, () => {
+    // . -> A -> B --> D
+    //        -> D@X
+    //   -> D@Y
+    // should be hoisted to (A and B should share single D@X dependency):
+    // . -> A -> B
+    //        -> D@X
+    //   -> D@Y
+    const graph = {
+      id: '.',
+      dependencies: [
+        {
+          id: 'A',
+          dependencies: [
+            {
+              id: 'B',
+              peerNames: ['D'],
+            },
+            { id: 'D@X' },
+          ],
+        },
+        { id: 'D@Y' },
+      ],
+    };
+    expect(hoist(graph as Package)).toEqual(graph);
+  });
+
+  it(`should hoist dependencies after hoisting peer dependency`, () => {
+    // . -> A -> B --> D@X
+    //        -> D@X
+    // should be hoisted to (B should be hoisted because its inherited dep D@X was hoisted):
+    // . -> A
+    //   -> B
+    //   -> D@X
+    const graph = {
+      id: '.',
+      dependencies: [
+        {
+          id: 'A',
+          dependencies: [
+            {
+              id: 'B',
+              peerNames: ['D'],
+            },
+            { id: 'D@X' },
+          ],
+        },
+      ],
+    };
+    const hoistedGraph = {
+      id: '.',
+      dependencies: [
+        {
+          id: 'A',
+        },
+        {
+          id: 'B',
+          peerNames: ['D'],
+        },
+        { id: 'D@X' },
+      ],
+    };
+    expect(hoist(graph as Package, { dump: true })).toEqual(hoistedGraph);
+  });
 });

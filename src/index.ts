@@ -218,6 +218,7 @@ const getHoistVerdict = (
   let priorityDepth;
   let newParentIndex;
 
+  // Check require promise
   for (newParentIndex = 0; newParentIndex < graphPath.length - 1; newParentIndex++) {
     const newParentPkg = graphPath[newParentIndex];
 
@@ -244,8 +245,35 @@ const getHoistVerdict = (
       }
     }
 
-    if (isHoistable === Hoistable.YES) {
+    if (isHoistable !== Hoistable.NO) {
       break;
+    }
+  }
+
+  // Check peer dependency promise
+  if (isHoistable === Hoistable.YES) {
+    if (dep.peerNames) {
+      for (const peerName of dep.peerNames) {
+        if (parentPkg.dependencies!.has(peerName)) {
+          // The parent peer dependency was not hoisted, figuring out why...
+
+          const depPriority = priorityIds.indexOf(dep.id);
+          if (depPriority <= currentPriorityDepth) {
+            // Should have been hoisted already, but is not the case
+            isHoistable = Hoistable.NO;
+            break;
+          } else {
+            // Should be hoisted later, wait
+            isHoistable = Hoistable.LATER;
+            priorityDepth = Math.max(priorityDepth, depPriority);
+          }
+        } else if (isHoistable === Hoistable.YES) {
+          // The parent peer dependency was hoisted, finding the hoist point
+          const hoistParent = parentPkg.hoistedTo!.get(peerName)!;
+          const hoistIndex = graphPath.indexOf(hoistParent);
+          newParentIndex = Math.max(newParentIndex, hoistIndex);
+        }
+      }
     }
   }
 
@@ -306,12 +334,12 @@ const hoistDependencies = (
   hoistQueue?: HoistQueue
 ) => {
   const parentPkg = graphPath[graphPath.length - 1];
-  // console.log(
-  //   currentPriorityDepth === 0 ? 'visit' : 'revisit',
-  //   graphPath.map((x) => x.id),
-  //   depNames
-  // );
-  const sortedDepNames = getSortedRegularDependencies(parentPkg, depNames);
+  console.log(
+    currentPriorityDepth === 0 ? 'visit' : 'revisit',
+    graphPath.map((x) => x.id),
+    depNames
+  );
+  const sortedDepNames = depNames.size === 1 ? depNames : getSortedRegularDependencies(parentPkg, depNames);
 
   for (const depName of sortedDepNames) {
     const dep = parentPkg.dependencies!.get(depName)!;
@@ -335,17 +363,17 @@ const hoistDependencies = (
       if (!rootPkg.dependencies.has(depName)) {
         rootPkg.dependencies.set(depName, dep);
       }
-      // console.log(
-      //   graphPath.map((x) => x.id),
-      //   'hoist',
-      //   dep.id,
-      //   'into',
-      //   rootPkg.id,
-      //   'result:\n',
-      //   require('util').inspect(graphPath[0], false, null)
-      // );
+      console.log(
+        graphPath.map((x) => x.id),
+        'hoist',
+        dep.id,
+        'into',
+        rootPkg.id,
+        'result:\n',
+        require('util').inspect(graphPath[0], false, null)
+      );
     } else if (verdict.isHoistable === Hoistable.LATER) {
-      // console.log('queue', graphPath.map((x) => x.id).concat([dep.id]));
+      console.log('queue', graphPath.map((x) => x.id).concat([dep.id]));
       hoistQueue![verdict.priorityDepth].push({ graphPath: graphPath.map((x) => x.id), depName });
     }
   }
