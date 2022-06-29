@@ -370,6 +370,7 @@ describe('hoist', () => {
         },
       ],
     };
+
     const hoistedGraph = {
       id: '.',
       dependencies: [
@@ -383,6 +384,6 @@ describe('hoist', () => {
         { id: 'D@X' },
       ],
     };
-    expect(hoist(graph as Package, { dump: true })).toEqual(hoistedGraph);
+    expect(hoist(graph as Package)).toEqual(hoistedGraph);
   });
 });

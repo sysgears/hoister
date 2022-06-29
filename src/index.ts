@@ -331,14 +331,19 @@ const hoistDependencies = (
   hoistPriorities: HoistPriorities,
   currentPriorityDepth: number,
   depNames: Set<PackageName>,
+  options: Options,
   hoistQueue?: HoistQueue
 ) => {
   const parentPkg = graphPath[graphPath.length - 1];
-  console.log(
-    currentPriorityDepth === 0 ? 'visit' : 'revisit',
-    graphPath.map((x) => x.id),
-    depNames
-  );
+
+  if (options.dump) {
+    console.log(
+      currentPriorityDepth === 0 ? 'visit' : 'revisit',
+      graphPath.map((x) => x.id),
+      depNames
+    );
+  }
+
   const sortedDepNames = depNames.size === 1 ? depNames : getSortedRegularDependencies(parentPkg, depNames);
 
   for (const depName of sortedDepNames) {
@@ -363,17 +368,23 @@ const hoistDependencies = (
       if (!rootPkg.dependencies.has(depName)) {
         rootPkg.dependencies.set(depName, dep);
       }
-      console.log(
-        graphPath.map((x) => x.id),
-        'hoist',
-        dep.id,
-        'into',
-        rootPkg.id,
-        'result:\n',
-        require('util').inspect(graphPath[0], false, null)
-      );
+
+      if (options.dump) {
+        console.log(
+          graphPath.map((x) => x.id),
+          'hoist',
+          dep.id,
+          'into',
+          rootPkg.id,
+          'result:\n',
+          require('util').inspect(graphPath[0], false, null)
+        );
+      }
     } else if (verdict.isHoistable === Hoistable.LATER) {
-      console.log('queue', graphPath.map((x) => x.id).concat([dep.id]));
+      if (options.dump) {
+        console.log('queue', graphPath.map((x) => x.id).concat([dep.id]));
+      }
+
       hoistQueue![verdict.priorityDepth].push({ graphPath: graphPath.map((x) => x.id), depName });
     }
   }
@@ -417,7 +428,7 @@ export const hoist = (pkg: Package, opts?: Options): Package => {
     }
 
     if (graphPath.length > 1 && node.dependencies) {
-      hoistDependencies(graphPath, priorities, priorityDepth, new Set(node.dependencies.keys()), hoistQueue);
+      hoistDependencies(graphPath, priorities, priorityDepth, new Set(node.dependencies.keys()), options, hoistQueue);
     }
 
     if (graphPath.indexOf(node) === graphPath.length - 1) {
@@ -477,7 +488,7 @@ export const hoist = (pkg: Package, opts?: Options): Package => {
         }
         parentPkg = graphPath[graphPath.length - 1];
       }
-      hoistDependencies(graphPath, priorities, priorityDepth, new Set([queueElement.depName]));
+      hoistDependencies(graphPath, priorities, priorityDepth, new Set([queueElement.depName]), options);
     }
   }
 
