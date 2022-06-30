@@ -505,9 +505,11 @@ export const hoist = (pkg: Package, opts?: Options): Package => {
 
       if (node.dependencies) {
         for (const dep of node.dependencies.values()) {
-          graphPath.push(dep);
-          visitParent(graphPath, { isWorkspaceDep: false });
-          graphPath.pop();
+          if (dep.id !== node.id) {
+            graphPath.push(dep);
+            visitParent(graphPath, { isWorkspaceDep: false });
+            graphPath.pop();
+          }
         }
       }
     }

@@ -321,6 +321,96 @@ describe('hoist', () => {
     expect(hoist(graph as Package)).toEqual(hoistedGraph);
   });
 
+  it(`should properly hoist package that has several versions on the same tree path`, () => {
+    // . -> A -> B@X -> C -> B@Y
+    // should be hoisted to:
+    // . -> A
+    //   -> B@X
+    //   -> C -> B@Y
+    const graph = {
+      id: '.',
+      dependencies: [
+        {
+          id: 'A',
+          dependencies: [
+            {
+              id: 'B@X',
+              dependencies: [
+                {
+                  id: 'C',
+                  dependencies: [{ id: 'B@Y' }],
+                },
+              ],
+            },
+          ],
+        },
+      ],
+    };
+
+    const hoistedGraph = {
+      id: '.',
+      dependencies: [
+        { id: 'A' },
+        { id: 'B@X' },
+        {
+          id: 'C',
+          dependencies: [{ id: 'B@Y' }],
+        },
+      ],
+    };
+
+    expect(hoist(graph as Package)).toEqual(hoistedGraph);
+  });
+
+  it(`should tolerate self-dependencies`, () => {
+    // . -> .
+    //   -> A -> A
+    //        -> B@X -> B@X
+    //               -> C@Y
+    //        -> C@X
+    //   -> B@Y
+    //   -> C@X
+    // should be hoisted to:
+    // . -> A -> B@X
+    //        -> C@Y
+    //   -> B@Y
+    //   -> C@X
+    const graph = {
+      id: '.',
+      dependencies: [
+        { id: '.' },
+        {
+          id: 'A',
+          dependencies: [
+            { id: 'A' },
+            {
+              id: 'B@X',
+              dependencies: [{ id: 'B@X' }, { id: 'C@Y' }],
+            },
+            { id: 'C@X' },
+          ],
+        },
+        { id: 'B@Y' },
+        { id: 'C@X' },
+      ],
+    };
+
+    const hoistedGraph = {
+      id: '.',
+      dependencies: [
+        { id: '.' },
+        {
+          id: 'A',
+          dependencies: [{ id: 'B@X' }, { id: 'C@Y' }],
+        },
+        { id: 'B@Y' },
+        { id: 'C@X' },
+      ],
+    };
+
+    expect(hoist(graph as Package)).toEqual(hoistedGraph);
+  });
+
   it(`should support basic peer dependencies`, () => {
     // . -> A -> B --> D
     //        -> D@X
