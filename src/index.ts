@@ -182,10 +182,10 @@ type QueueElement = { graphPath: PackageId[]; depName: PackageName };
 type HoistQueue = Array<QueueElement[]>;
 
 enum Hoistable {
-  LATER,
-  YES,
-  NO,
-  DEPENDS,
+  LATER = 'LATER',
+  YES = 'YES',
+  NO = 'NO',
+  DEPENDS = 'DEPENDS',
 }
 
 type HoistVerdict =
@@ -202,7 +202,8 @@ type HoistVerdict =
     }
   | {
       isHoistable: Hoistable.DEPENDS;
-      dependsOn: Set<Graph>;
+      dependsOn: Set<PackageName>;
+      newParentIndex: number;
     };
 
 const getHoistVerdict = (
@@ -215,6 +216,7 @@ const getHoistVerdict = (
   const dep = parentPkg.dependencies!.get(depName)!;
   const priorityIds = hoistPriorities.get(depName)!;
   let isHoistable = Hoistable.NO;
+  const dependsOn = new Set<PackageName>();
   let priorityDepth;
   let newParentIndex;
 
@@ -254,24 +256,45 @@ const getHoistVerdict = (
   if (isHoistable === Hoistable.YES) {
     if (dep.peerNames) {
       for (const peerName of dep.peerNames) {
-        if (parentPkg.dependencies!.has(peerName)) {
-          // The parent peer dependency was not hoisted, figuring out why...
-
-          const depPriority = priorityIds.indexOf(dep.id);
-          if (depPriority <= currentPriorityDepth) {
-            // Should have been hoisted already, but is not the case
-            isHoistable = Hoistable.NO;
-            break;
+        let peerParent;
+        let isUnhoistedPeerDep = false;
+        let peerParentIdx;
+        for (peerParentIdx = graphPath.length - 1; peerParentIdx >= 0; peerParentIdx--) {
+          if (graphPath[peerParentIdx].dependencies?.has(peerName)) {
+            isUnhoistedPeerDep = true;
+            peerParent = graphPath[peerParentIdx];
           } else {
-            // Should be hoisted later, wait
-            isHoistable = Hoistable.LATER;
-            priorityDepth = Math.max(priorityDepth, depPriority);
+            peerParent = graphPath[peerParentIdx].hoistedTo?.get(peerName);
+            if (peerParent) {
+              peerParentIdx = graphPath.indexOf(peerParent);
+            }
           }
-        } else if (isHoistable === Hoistable.YES) {
-          // The parent peer dependency was hoisted, finding the hoist point
-          const hoistParent = parentPkg.hoistedTo!.get(peerName)!;
-          const hoistIndex = graphPath.indexOf(hoistParent);
-          newParentIndex = Math.max(newParentIndex, hoistIndex);
+
+          if (peerParent) break;
+        }
+
+        if (peerParent) {
+          if (isUnhoistedPeerDep) {
+            const depPriority = priorityIds.indexOf(dep.id);
+            if (depPriority <= currentPriorityDepth) {
+              if (peerParentIdx === graphPath.length - 1) {
+                // Might be a cyclic peer dependency, mark that we depend on it
+                isHoistable = Hoistable.DEPENDS;
+                dependsOn.add(peerName);
+              } else {
+                // Should have been hoisted already, but is not the case
+                isHoistable = Hoistable.NO;
+                break;
+              }
+            } else {
+              // Should be hoisted later, wait
+              isHoistable = Hoistable.LATER;
+              priorityDepth = Math.max(priorityDepth, depPriority);
+            }
+          } else {
+            // Peer dep was hoisted, we should not hoist higher than it
+            newParentIndex = Math.max(newParentIndex, peerParentIdx);
+          }
         }
       }
     }
@@ -279,6 +302,8 @@ const getHoistVerdict = (
 
   if (isHoistable === Hoistable.LATER) {
     return { isHoistable, priorityDepth };
+  } else if (isHoistable === Hoistable.DEPENDS) {
+    return { isHoistable, dependsOn, newParentIndex };
   } else if (isHoistable === Hoistable.YES) {
     return { isHoistable, newParentIndex };
   } else {
@@ -336,20 +361,55 @@ const hoistDependencies = (
 ) => {
   const parentPkg = graphPath[graphPath.length - 1];
 
-  if (options.dump) {
+  const sortedDepNames = depNames.size === 1 ? depNames : getSortedRegularDependencies(parentPkg, depNames);
+  const peerDependants = new Map<PackageName, Set<PackageName>>();
+  const verdictMap = new Map<PackageName, HoistVerdict>();
+  for (const depName of sortedDepNames) {
+    verdictMap.set(depName, getHoistVerdict(graphPath, depName, hoistPriorities, currentPriorityDepth));
+  }
+  const originalVerdictMap = new Map(verdictMap);
+
+  for (const [dependerName, verdict] of verdictMap) {
+    if (verdict.isHoistable === Hoistable.DEPENDS) {
+      for (const dependeeName of verdict.dependsOn) {
+        const dependants = peerDependants.get(dependeeName) || new Set();
+        dependants.add(dependerName);
+        peerDependants.set(dependeeName, dependants);
+      }
+    }
+  }
+
+  for (const [nodeName, verdict] of verdictMap) {
+    const dependants = peerDependants.get(nodeName);
+    if (dependants) {
+      for (const dependantName of dependants) {
+        const originalVerdict = verdictMap.get(dependantName)!;
+        if (originalVerdict.isHoistable === Hoistable.DEPENDS && verdict.isHoistable === Hoistable.DEPENDS) {
+          verdictMap.set(dependantName, {
+            isHoistable: Hoistable.DEPENDS,
+            newParentIndex: Math.max(originalVerdict.newParentIndex, verdict.newParentIndex),
+            dependsOn: originalVerdict.dependsOn,
+          });
+        } else {
+          verdictMap.set(dependantName, verdict);
+        }
+      }
+    }
+  }
+
+  if (options.trace) {
     console.log(
       currentPriorityDepth === 0 ? 'visit' : 'revisit',
       graphPath.map((x) => x.id),
-      depNames
+      originalVerdictMap,
+      verdictMap
     );
   }
 
-  const sortedDepNames = depNames.size === 1 ? depNames : getSortedRegularDependencies(parentPkg, depNames);
-
   for (const depName of sortedDepNames) {
     const dep = parentPkg.dependencies!.get(depName)!;
-    const verdict = getHoistVerdict(graphPath, depName, hoistPriorities, currentPriorityDepth);
-    if (verdict.isHoistable === Hoistable.YES) {
+    const verdict = verdictMap.get(depName)!;
+    if (verdict.isHoistable === Hoistable.YES || verdict.isHoistable === Hoistable.DEPENDS) {
       const rootPkg = graphPath[verdict.newParentIndex];
       const parentPkg = graphPath[graphPath.length - 1];
       if (parentPkg.dependencies) {
@@ -369,7 +429,7 @@ const hoistDependencies = (
         rootPkg.dependencies.set(depName, dep);
       }
 
-      if (options.dump) {
+      if (options.trace) {
         console.log(
           graphPath.map((x) => x.id),
           'hoist',
@@ -381,7 +441,7 @@ const hoistDependencies = (
         );
       }
     } else if (verdict.isHoistable === Hoistable.LATER) {
-      if (options.dump) {
+      if (options.trace) {
         console.log('queue', graphPath.map((x) => x.id).concat([dep.id]));
       }
 
@@ -391,12 +451,12 @@ const hoistDependencies = (
 };
 
 type Options = {
-  dump: boolean;
+  trace: boolean;
 };
 
 export const hoist = (pkg: Package, opts?: Options): Package => {
   const graph = toGraph(pkg);
-  const options = opts || { dump: false };
+  const options = opts || { trace: false };
 
   const priorities = getHoistPriorities(graph);
   let maxPriorityDepth = 0;
@@ -492,7 +552,7 @@ export const hoist = (pkg: Package, opts?: Options): Package => {
     }
   }
 
-  if (options.dump) {
+  if (options.trace) {
     console.log(require('util').inspect(graph, false, null));
   }
 

@@ -345,6 +345,7 @@ describe('hoist', () => {
         { id: 'D@Y' },
       ],
     };
+
     expect(hoist(graph as Package)).toEqual(graph);
   });
 
@@ -384,6 +385,43 @@ describe('hoist', () => {
         { id: 'D@X' },
       ],
     };
+
+    expect(hoist(graph as Package)).toEqual(hoistedGraph);
+  });
+
+  it('should support basic cyclic peer dependencies', () => {
+    //   -> D -> A --> B
+    //        -> B --> C
+    //        -> C --> A
+    // Should be hoisted to:
+    //   -> D
+    //   -> A
+    //   -> B
+    //   -> C
+    const graph = {
+      id: '.',
+      dependencies: [
+        {
+          id: 'D',
+          dependencies: [
+            { id: 'A', peerNames: ['B'] },
+            { id: 'B', peerNames: ['C'] },
+            { id: 'C', peerNames: ['A'] },
+          ],
+        },
+      ],
+    };
+
+    const hoistedGraph = {
+      id: '.',
+      dependencies: [
+        { id: 'A', peerNames: ['B'] },
+        { id: 'B', peerNames: ['C'] },
+        { id: 'C', peerNames: ['A'] },
+        { id: 'D' },
+      ],
+    };
+
     expect(hoist(graph as Package)).toEqual(hoistedGraph);
   });
 });
