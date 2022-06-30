@@ -424,4 +424,36 @@ describe('hoist', () => {
 
     expect(hoist(graph as Package)).toEqual(hoistedGraph);
   });
+
+  it('should support partially hoistable cyclic peer dependencies', () => {
+    // . -> E@X
+    //   -> D -> A --> B
+    //        -> B --> C
+    //        -> C --> A
+    //             --> E@Y
+    //        -> E@Y
+    // Should be hoisted to:
+    // . -> E@X
+    //   -> D -> A
+    //        -> B
+    //        -> C
+    //        -> E@Y
+    const graph = {
+      id: '.',
+      dependencies: [
+        {
+          id: 'D',
+          dependencies: [
+            { id: 'A', peerNames: ['B'] },
+            { id: 'B', peerNames: ['C'] },
+            { id: 'C', peerNames: ['A', 'E'] },
+            { id: 'E@Y' },
+          ],
+        },
+        { id: 'E@X' },
+      ],
+    };
+
+    expect(hoist(graph as Package)).toEqual(graph);
+  });
 });

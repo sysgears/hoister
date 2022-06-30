@@ -384,9 +384,12 @@ const hoistDependencies = (
     if (dependants) {
       for (const dependantName of dependants) {
         const originalVerdict = verdictMap.get(dependantName)!;
-        if (originalVerdict.isHoistable === Hoistable.DEPENDS && verdict.isHoistable === Hoistable.DEPENDS) {
+        if (
+          originalVerdict.isHoistable === Hoistable.DEPENDS &&
+          (verdict.isHoistable === Hoistable.DEPENDS || verdict.isHoistable === Hoistable.YES)
+        ) {
           verdictMap.set(dependantName, {
-            isHoistable: Hoistable.DEPENDS,
+            isHoistable: verdict.isHoistable,
             newParentIndex: Math.max(originalVerdict.newParentIndex, verdict.newParentIndex),
             dependsOn: originalVerdict.dependsOn,
           });
