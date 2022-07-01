@@ -546,4 +546,183 @@ describe('hoist', () => {
 
     expect(hoist(graph as Package)).toEqual(graph);
   });
+
+  it(`should respect transitive peer dependencies mixed with direct peer dependencies`, () => {
+    // . -> A -> B --> C
+    //             -> D --> C
+    //                  --> E
+    //             -> E
+    //        -> C@X
+    //   -> C@Y
+    // should be hoisted to:
+    // . -> A -> B --> C
+    //        -> C@X
+    //        -> D --> C
+    //             --> E
+    //   -> C@Y
+    //   -> E
+    // B and D cannot be hoisted to the top, otherwise they will use C@Y, instead of C@X
+    const graph = {
+      id: '.',
+      dependencies: [
+        {
+          id: 'A',
+          dependencies: [
+            {
+              id: 'B',
+              dependencies: [
+                {
+                  id: 'D',
+                  peerNames: ['C', 'E'],
+                },
+                { id: 'E' },
+              ],
+              peerNames: ['C'],
+            },
+            { id: 'C@X' },
+          ],
+        },
+        { id: 'C@Y' },
+      ],
+    };
+
+    const hoistedGraph = {
+      id: '.',
+      dependencies: [
+        {
+          id: 'A',
+          dependencies: [
+            {
+              id: 'B',
+              peerNames: ['C'],
+            },
+            { id: 'C@X' },
+            {
+              id: 'D',
+              peerNames: ['C', 'E'],
+            },
+          ],
+        },
+        { id: 'C@Y' },
+        { id: 'E' },
+      ],
+    };
+
+    expect(hoist(graph as Package)).toEqual(hoistedGraph);
+  });
+
+  it(`should support two branch circular graph hoisting`, () => {
+    // . -> B -> D@X -> F@X
+    //               -> E@X -> D@X
+    //                      -> F@X
+    //   -> C -> D@Y -> F@Y
+    //               -> E@Y -> D@Y
+    //                      -> F@Y
+    // should be hoisted to:
+    // . -> B
+    //   -> C -> D@Y -> E@Y
+    //        -> F@Y
+    //   -> D@X
+    //   -> E@X
+    //   -> F@X
+    // This graph with two similar circular branches should be hoisted in a finite time
+    const graph = {
+      id: '.',
+      dependencies: [
+        {
+          id: 'B',
+          dependencies: [
+            {
+              id: 'D@X',
+              dependencies: [
+                { id: 'F@X' },
+                {
+                  id: 'E@X',
+                  dependencies: [{ id: 'D@X' }, { id: 'F@X' }],
+                },
+              ],
+            },
+          ],
+        },
+        {
+          id: 'C',
+          dependencies: [
+            {
+              id: 'D@Y',
+              dependencies: [
+                { id: 'F@Y' },
+                {
+                  id: 'E@Y',
+                  dependencies: [{ id: 'D@Y' }, { id: 'F@Y' }],
+                },
+              ],
+            },
+          ],
+        },
+      ],
+    };
+
+    const hoistedGraph = {
+      id: '.',
+      dependencies: [
+        { id: 'B' },
+        {
+          id: 'C',
+          dependencies: [
+            {
+              id: 'D@Y',
+              dependencies: [{ id: 'E@Y' }],
+            },
+            { id: 'F@Y' },
+          ],
+        },
+        { id: 'D@X' },
+        { id: 'E@X' },
+        { id: 'F@X' },
+      ],
+    };
+
+    expect(hoist(graph as Package)).toEqual(hoistedGraph);
+  });
+
+  it(`should hoist dependencies that peer depend on their parent`, () => {
+    // . -> C -> A -> B --> A
+    // should be hoisted to:
+    // . -> A
+    //   -> B
+    //   -> C
+    const graph = {
+      id: '.',
+      dependencies: [
+        {
+          id: 'C',
+          dependencies: [
+            {
+              id: 'A',
+              dependencies: [
+                {
+                  id: 'B',
+                  peerNames: ['A'],
+                },
+              ],
+            },
+          ],
+        },
+      ],
+    };
+
+    const hoistedGraph = {
+      id: '.',
+      dependencies: [
+        { id: 'A' },
+        {
+          id: 'B',
+          peerNames: ['A'],
+        },
+        { id: 'C' },
+      ],
+    };
+
+    expect(hoist(graph as Package)).toEqual(hoistedGraph);
+  });
 });

@@ -215,7 +215,7 @@ const getHoistVerdict = (
   const parentPkg = graphPath[graphPath.length - 1];
   const dep = parentPkg.dependencies!.get(depName)!;
   const priorityIds = hoistPriorities.get(depName)!;
-  let isHoistable = Hoistable.NO;
+  let isHoistable;
   const dependsOn = new Set<PackageName>();
   let priorityDepth;
   let newParentIndex;
@@ -257,16 +257,17 @@ const getHoistVerdict = (
     if (dep.peerNames) {
       for (const peerName of dep.peerNames) {
         let peerParent;
-        let isUnhoistedPeerDep = false;
+        let isHoistedPeerDep;
         let peerParentIdx;
         for (peerParentIdx = graphPath.length - 1; peerParentIdx >= 0; peerParentIdx--) {
           if (graphPath[peerParentIdx].dependencies?.has(peerName)) {
-            isUnhoistedPeerDep = true;
+            isHoistedPeerDep = false;
             peerParent = graphPath[peerParentIdx];
           } else {
             peerParent = graphPath[peerParentIdx].hoistedTo?.get(peerName);
             if (peerParent) {
               peerParentIdx = graphPath.indexOf(peerParent);
+              isHoistedPeerDep = true;
             }
           }
 
@@ -274,7 +275,9 @@ const getHoistVerdict = (
         }
 
         if (peerParent) {
-          if (isUnhoistedPeerDep) {
+          if (isHoistedPeerDep) {
+            newParentIndex = Math.max(newParentIndex, peerParentIdx);
+          } else {
             const depPriority = priorityIds.indexOf(dep.id);
             if (depPriority <= currentPriorityDepth) {
               if (peerParentIdx === graphPath.length - 1) {
@@ -282,18 +285,13 @@ const getHoistVerdict = (
                 isHoistable = Hoistable.DEPENDS;
                 dependsOn.add(peerName);
               } else {
-                // Should have been hoisted already, but is not the case
-                isHoistable = Hoistable.NO;
-                break;
+                newParentIndex = Math.max(newParentIndex, peerParentIdx);
               }
             } else {
               // Should be hoisted later, wait
               isHoistable = Hoistable.LATER;
               priorityDepth = Math.max(priorityDepth, depPriority);
             }
-          } else {
-            // Peer dep was hoisted, we should not hoist higher than it
-            newParentIndex = Math.max(newParentIndex, peerParentIdx);
           }
         }
       }
