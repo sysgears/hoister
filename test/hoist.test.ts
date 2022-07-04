@@ -321,12 +321,15 @@ describe('hoist', () => {
     expect(hoist(graph as Package)).toEqual(hoistedGraph);
   });
 
-  it(`should properly hoist package that has several versions on the same tree path`, () => {
-    // . -> A -> B@X -> C -> B@Y
+  it('should not hoisted to a place of previously hoisted dependency with conflicting version', () => {
+    // . -> A -> B@X
+    //        -> C@X -> B@Y
+    //   -> C@Y
     // should be hoisted to:
-    // . -> A
+    // . -> A -> C@X -> B@Y
     //   -> B@X
-    //   -> C -> B@Y
+    //   -> C@Y
+    // B@Y cannot be hoisted further to A because it will take place of B@X in A, which result in a conflict
     const graph = {
       id: '.',
       dependencies: [
@@ -335,32 +338,79 @@ describe('hoist', () => {
           dependencies: [
             {
               id: 'B@X',
-              dependencies: [
-                {
-                  id: 'C',
-                  dependencies: [{ id: 'B@Y' }],
-                },
-              ],
+            },
+            {
+              id: 'C@X',
+              dependencies: [{ id: 'B@Y' }],
             },
           ],
         },
+        { id: 'C@Y' },
       ],
     };
 
     const hoistedGraph = {
       id: '.',
       dependencies: [
-        { id: 'A' },
-        { id: 'B@X' },
         {
-          id: 'C',
-          dependencies: [{ id: 'B@Y' }],
+          id: 'A',
+          dependencies: [
+            {
+              id: 'C@X',
+              dependencies: [{ id: 'B@Y' }],
+            },
+          ],
         },
+        { id: 'B@X' },
+        { id: 'C@Y' },
       ],
     };
 
     expect(hoist(graph as Package)).toEqual(hoistedGraph);
   });
+
+  // it(`should properly hoist package that has several versions on the same tree path`, () => {
+  //   // . -> A -> B@X -> C@Y -> D@Y -> E@Y -> C@X
+  //   //   -> B@Y
+  //   //   -> D@X
+  //   //   -> E@Y
+  //   // should be hoisted to:
+  //   // . -> A -> B@X
+  //   //        -> C@Y
+  //   const graph = {
+  //     id: '.',
+  //     dependencies: [
+  //       {
+  //         id: 'A',
+  //         dependencies: [
+  //           {
+  //             id: 'B@X',
+  //             dependencies: [
+  //               {
+  //                 id: 'C',
+  //                 dependencies: [{ id: 'B@Y' }],
+  //               },
+  //             ],
+  //           },
+  //         ],
+  //       },
+  //     ],
+  //   };
+
+  //   const hoistedGraph = {
+  //     id: '.',
+  //     dependencies: [
+  //       { id: 'A' },
+  //       { id: 'B@X' },
+  //       {
+  //         id: 'C',
+  //         dependencies: [{ id: 'B@Y' }],
+  //       },
+  //     ],
+  //   };
+
+  //   expect(hoist(graph as Package)).toEqual(hoistedGraph);
+  // });
 
   it(`should tolerate self-dependencies`, () => {
     // . -> .

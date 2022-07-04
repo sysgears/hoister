@@ -224,7 +224,7 @@ const getHoistVerdict = (
   for (newParentIndex = 0; newParentIndex < graphPath.length - 1; newParentIndex++) {
     const newParentPkg = graphPath[newParentIndex];
 
-    const newParentDep = newParentPkg.dependencies?.get(depName);
+    const newParentDep = newParentPkg.dependencies?.get(depName) || newParentPkg?.hoistedTo?.get(depName);
     priorityDepth = priorityIds.indexOf(dep.id);
     const isDepTurn = priorityDepth === currentPriorityDepth;
     if (!newParentDep) {
