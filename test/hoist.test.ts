@@ -222,11 +222,7 @@ describe('hoist', () => {
             { id: 'H@X' },
             {
               id: 'I@X',
-              dependencies: [
-                {
-                  id: 'B@Z',
-                },
-              ],
+              dependencies: [{ id: 'B@Z' }],
             },
           ],
         },
@@ -258,7 +254,8 @@ describe('hoist', () => {
     //        -> D@X
     //   -> F -> C@Y
     // should be hoisted to:
-    // . -> A -> B@X -> C@X (-> D@X)
+    // . -> A -> B@X -> C@X
+    //               -> D@X
     //        -> D@Y
     //   -> B@Y
     //   -> C@Y
@@ -301,11 +298,7 @@ describe('hoist', () => {
           dependencies: [
             {
               id: 'B@X',
-              dependencies: [
-                {
-                  id: 'C@X',
-                },
-              ],
+              dependencies: [{ id: 'C@X' }, { id: 'D@X' }],
             },
             { id: 'D@Y' },
           ],
@@ -369,8 +362,55 @@ describe('hoist', () => {
     expect(hoist(graph as Package)).toEqual(hoistedGraph);
   });
 
-  // it(`should properly hoist package that has several versions on the same tree path`, () => {
-  //   // . -> A -> B@X -> C@Y -> D@Y -> E@Y -> C@X
+  it('should not break require promise by hoisting higher than the package with conflicting version', () => {
+    // . -> A -> B@Y
+    //        -> C@X -> B@X
+    //   -> C@Y -> B@Y
+    // should be hoisted to:
+    // . -> A -> C@X -> B@X
+    //   -> B@Y
+    //   -> C@Y
+    // The B@X cannot be hoisted to the top, because in this case the C@X will get B@Y instead of B@X when requiring B.
+    const graph = {
+      id: '.',
+      dependencies: [
+        {
+          id: 'A',
+          dependencies: [
+            { id: 'B@Y' },
+            {
+              id: 'C@X',
+              dependencies: [{ id: 'B@X' }],
+            },
+          ],
+        },
+        { id: 'C@Y', dependencies: [{ id: 'B@Y' }] },
+      ],
+    };
+
+    const hoistedGraph = {
+      id: '.',
+      dependencies: [
+        {
+          id: 'A',
+          dependencies: [
+            {
+              id: 'C@X',
+              dependencies: [{ id: 'B@X' }],
+            },
+          ],
+        },
+        { id: 'B@Y' },
+        { id: 'C@Y' },
+      ],
+    };
+
+    expect(hoist(graph as Package)).toEqual(hoistedGraph);
+  });
+
+  // it(`should properly hoist package that has several versions on the tree path`, () => {
+  //   // . -> A -> B@X -> C@Y
+  //   //               -> D@Y -> E@Y -> C@X
   //   //   -> B@Y
   //   //   -> D@X
   //   //   -> E@Y
@@ -421,8 +461,7 @@ describe('hoist', () => {
     //   -> B@Y
     //   -> C@X
     // should be hoisted to:
-    // . -> A -> B@X
-    //        -> C@Y
+    // . -> A -> B@X -> C@Y
     //   -> B@Y
     //   -> C@X
     const graph = {
@@ -451,7 +490,7 @@ describe('hoist', () => {
         { id: '.' },
         {
           id: 'A',
-          dependencies: [{ id: 'B@X' }, { id: 'C@Y' }],
+          dependencies: [{ id: 'B@X', dependencies: [{ id: 'C@Y' }] }],
         },
         { id: 'B@Y' },
         { id: 'C@X' },

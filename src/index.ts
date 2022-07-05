@@ -215,40 +215,61 @@ const getHoistVerdict = (
   const parentPkg = graphPath[graphPath.length - 1];
   const dep = parentPkg.dependencies!.get(depName)!;
   const priorityIds = hoistPriorities.get(depName)!;
-  let isHoistable;
+  let isHoistable = Hoistable.YES;
   const dependsOn = new Set<PackageName>();
   let priorityDepth;
   let newParentIndex;
 
-  // Check require promise
-  for (newParentIndex = 0; newParentIndex < graphPath.length - 1; newParentIndex++) {
-    const newParentPkg = graphPath[newParentIndex];
-
-    const newParentDep = newParentPkg.dependencies?.get(depName) || newParentPkg?.hoistedTo?.get(depName);
-    priorityDepth = priorityIds.indexOf(dep.id);
-    const isDepTurn = priorityDepth === currentPriorityDepth;
-    if (!newParentDep) {
-      isHoistable = isDepTurn ? Hoistable.YES : Hoistable.LATER;
-    } else {
-      isHoistable = newParentDep.id === dep.id ? Hoistable.YES : Hoistable.NO;
+  let waterMark;
+  for (waterMark = graphPath.length - 2; waterMark > 0; waterMark--) {
+    let newParentIdx = waterMark;
+    const newParentPkg = graphPath[waterMark];
+    const hoistedParent = newParentPkg?.hoistedTo?.get(depName);
+    if (hoistedParent) {
+      newParentIdx = graphPath.indexOf(hoistedParent);
     }
 
-    if (isHoistable === Hoistable.YES) {
-      for (const [hoistedName, hoistedTo] of dep.hoistedTo || EMPTY_MAP) {
-        const originalId = hoistedTo.dependencies.get(hoistedName);
-        let availableId: PackageId | undefined = undefined;
-        for (let idx = 0; idx < newParentIndex; idx++) {
-          availableId = graphPath[idx].dependencies?.get(hoistedName)?.id;
-        }
-
-        isHoistable = availableId === originalId ? Hoistable.YES : Hoistable.NO;
-
-        if (isHoistable === Hoistable.NO) break;
+    const newParentDep = newParentPkg.dependencies?.get(depName);
+    if (newParentDep && newParentDep.id !== dep.id) {
+      waterMark = newParentIdx + 1;
+      if (waterMark === graphPath.length - 1) {
+        isHoistable = Hoistable.NO;
       }
-    }
-
-    if (isHoistable !== Hoistable.NO) {
       break;
+    }
+  }
+
+  if (isHoistable === Hoistable.YES) {
+    // Check require promise
+    for (newParentIndex = waterMark; newParentIndex < graphPath.length - 1; newParentIndex++) {
+      const newParentPkg = graphPath[newParentIndex];
+
+      const newParentDep = newParentPkg.dependencies?.get(depName) || newParentPkg?.hoistedTo?.get(depName);
+      priorityDepth = priorityIds.indexOf(dep.id);
+      const isDepTurn = priorityDepth === currentPriorityDepth;
+      if (!newParentDep) {
+        isHoistable = isDepTurn ? Hoistable.YES : Hoistable.LATER;
+      } else {
+        isHoistable = newParentDep.id === dep.id ? Hoistable.YES : Hoistable.NO;
+      }
+
+      if (isHoistable === Hoistable.YES) {
+        for (const [hoistedName, hoistedTo] of dep.hoistedTo || EMPTY_MAP) {
+          const originalId = hoistedTo.dependencies.get(hoistedName);
+          let availableId: PackageId | undefined = undefined;
+          for (let idx = 0; idx < newParentIndex; idx++) {
+            availableId = graphPath[idx].dependencies?.get(hoistedName)?.id;
+          }
+
+          isHoistable = availableId === originalId ? Hoistable.YES : Hoistable.NO;
+
+          if (isHoistable === Hoistable.NO) break;
+        }
+      }
+
+      if (isHoistable !== Hoistable.NO) {
+        break;
+      }
     }
   }
 
