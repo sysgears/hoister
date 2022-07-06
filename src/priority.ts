@@ -1,4 +1,4 @@
-import { PackageName, PackageId, PackageType, Graph } from '.';
+import { PackageName, PackageId, PackageType, WorkGraph } from '.';
 import { getPackageName } from './parse';
 
 export type HoistPriorities = Map<PackageName, PackageId[]>;
@@ -9,7 +9,7 @@ type PriorityOptions = {
   trace: boolean;
 };
 
-export const getHoistPriorities = (graph: Graph, opts?: PriorityOptions): HoistPriorities => {
+export const getHoistPriorities = (graph: WorkGraph, opts?: PriorityOptions): HoistPriorities => {
   const options = opts || { trace: false };
 
   const priorities = new Map();
@@ -19,7 +19,7 @@ export const getHoistPriorities = (graph: Graph, opts?: PriorityOptions): HoistP
 
   const seenWorkspaces = new Set();
 
-  const visitWorkspace = (workspace: Graph, workspaceLevel: number) => {
+  const visitWorkspace = (workspace: WorkGraph, workspaceLevel: number) => {
     if (seenWorkspaces.has(workspace)) return;
     seenWorkspaces.add(workspace);
 
@@ -39,8 +39,8 @@ export const getHoistPriorities = (graph: Graph, opts?: PriorityOptions): HoistP
 
   const seen = new Set();
   const visitDependency = (
-    pkg: Graph,
-    parentPkg: Graph,
+    pkg: WorkGraph,
+    parentPkg: WorkGraph,
     options: { workspaceLevel: number; isDirectDependency: boolean }
   ) => {
     if (seen.has(pkg)) return;
@@ -50,7 +50,6 @@ export const getHoistPriorities = (graph: Graph, opts?: PriorityOptions): HoistP
     if (!metrics) {
       metrics = {
         directDependencyLevel: maxWorkspaceLevel + 1,
-        peerCount: (pkg.peerNames || EMPTY_SET).size,
         parents: new Set(),
       };
       packageMetrics.set(pkg.id, metrics);
@@ -95,8 +94,6 @@ export const getHoistPriorities = (graph: Graph, opts?: PriorityOptions): HoistP
     const pkg2 = packageMetrics.get(id2);
     if (pkg2.directDependencyLevel !== pkg1.directDependencyLevel) {
       return pkg1.directDependencyLevel - pkg2.directDependencyLevel;
-    } else if (pkg2.peerCount !== pkg1.peerCount) {
-      return pkg2.peerCount - pkg1.peerCount;
     } else if (pkg2.parents.size !== pkg1.parents.size) {
       return pkg2.parents.size - pkg1.parents.size;
     } else {
@@ -115,7 +112,7 @@ export const getHoistPriorities = (graph: Graph, opts?: PriorityOptions): HoistP
   }
 
   if (options.trace) {
-    console.log('metrics:', require('util').inspect(packageMetrics, false, null));
+    console.log('metrics:', require('util').inspect(packageMetrics, false, 3));
     console.log('priorities', require('util').inspect(priorities, false, null));
   }
 

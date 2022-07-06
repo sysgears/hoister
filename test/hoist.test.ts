@@ -1,4 +1,4 @@
-import { Package, hoist } from '../src';
+import { Graph, hoist } from '../src';
 
 describe('hoist', () => {
   it('should do very basic hoisting', () => {
@@ -6,17 +6,17 @@ describe('hoist', () => {
     // should be hoisted to:
     // . -> A
     //   -> B
-    const graph = {
+    const graph: Graph = {
       id: '.',
       dependencies: [{ id: 'A', dependencies: [{ id: 'B' }] }],
     };
 
-    const hoistedGraph = {
+    const hoistedGraph: Graph = {
       id: '.',
       dependencies: [{ id: 'A' }, { id: 'B' }],
     };
 
-    expect(hoist(graph as Package)).toEqual(hoistedGraph);
+    expect(hoist(graph)).toEqual(hoistedGraph);
   });
 
   it(`should not hoist conflicting versions of a package`, () => {
@@ -31,7 +31,7 @@ describe('hoist', () => {
     //   -> C@Y
     //   -> D@Y
     //   -> E
-    const graph = {
+    const graph: Graph = {
       id: '.',
       dependencies: [
         {
@@ -43,7 +43,7 @@ describe('hoist', () => {
       ],
     };
 
-    const hoistedGraph = {
+    const hoistedGraph: Graph = {
       id: '.',
       dependencies: [
         {
@@ -56,7 +56,7 @@ describe('hoist', () => {
       ],
     };
 
-    expect(hoist(graph as Package)).toEqual(hoistedGraph);
+    expect(hoist(graph)).toEqual(hoistedGraph);
   });
 
   it(`should support basic cyclic dependencies`, () => {
@@ -68,7 +68,7 @@ describe('hoist', () => {
     //   -> C
     //   -> D
     //   -> E
-    const graph = {
+    const graph: Graph = {
       id: '.',
       dependencies: [
         {
@@ -86,12 +86,12 @@ describe('hoist', () => {
       ],
     };
 
-    const hoistedGraph = {
+    const hoistedGraph: Graph = {
       id: '.',
       dependencies: [{ id: 'A' }, { id: 'B' }, { id: 'C' }, { id: 'D' }, { id: 'E' }],
     };
 
-    expect(hoist(graph as Package)).toEqual(hoistedGraph);
+    expect(hoist(graph)).toEqual(hoistedGraph);
   });
 
   it('should hoist different instances of the package independently', () => {
@@ -107,8 +107,8 @@ describe('hoist', () => {
     //        -> C@X
     //   -> B@Y
     //   -> C@Z
-    const BX = { id: 'B@X', dependencies: [{ id: 'C@X' }] };
-    const graph = {
+    const BX: Graph = { id: 'B@X', dependencies: [{ id: 'C@X' }] };
+    const graph: Graph = {
       id: '.',
       dependencies: [
         { id: 'A', dependencies: [BX, { id: 'C@Y' }] },
@@ -118,7 +118,7 @@ describe('hoist', () => {
       ],
     };
 
-    const hoistedGraph = {
+    const hoistedGraph: Graph = {
       id: '.',
       dependencies: [
         { id: 'A', dependencies: [{ id: 'B@X', dependencies: [{ id: 'C@X' }] }, { id: 'C@Y' }] },
@@ -128,7 +128,7 @@ describe('hoist', () => {
       ],
     };
 
-    expect(hoist(graph as Package)).toEqual(hoistedGraph);
+    expect(hoist(graph)).toEqual(hoistedGraph);
   });
 
   it(`should honor package popularity when hoisting`, () => {
@@ -143,7 +143,7 @@ describe('hoist', () => {
     //   -> C
     //   -> D
     //   -> E@Y
-    const graph = {
+    const graph: Graph = {
       id: '.',
       dependencies: [
         { id: 'A', dependencies: [{ id: 'B@X', dependencies: [{ id: 'E@X' }] }] },
@@ -153,7 +153,7 @@ describe('hoist', () => {
       ],
     };
 
-    const hoistedGraph = {
+    const hoistedGraph: Graph = {
       id: '.',
       dependencies: [
         { id: 'A', dependencies: [{ id: 'B@X' }, { id: 'E@X' }] },
@@ -164,7 +164,7 @@ describe('hoist', () => {
       ],
     };
 
-    expect(hoist(graph as Package)).toEqual(hoistedGraph);
+    expect(hoist(graph)).toEqual(hoistedGraph);
   });
 
   it('should handle graph path cuts because of popularity', () => {
@@ -188,7 +188,7 @@ describe('hoist', () => {
     //   -> F -> B@X
     //   -> H@Y
     //   -> I@Y
-    const graph = {
+    const graph: Graph = {
       id: '.',
       dependencies: [
         {
@@ -212,7 +212,7 @@ describe('hoist', () => {
       ],
     };
 
-    const hoistedGraph = {
+    const hoistedGraph: Graph = {
       id: '.',
       dependencies: [
         {
@@ -243,7 +243,7 @@ describe('hoist', () => {
       ],
     };
 
-    expect(hoist(graph as Package)).toEqual(hoistedGraph);
+    expect(hoist(graph)).toEqual(hoistedGraph);
   });
 
   it(`should handle conflict with original dependencies after dependencies hoisting`, () => {
@@ -262,7 +262,7 @@ describe('hoist', () => {
     //   -> D@X
     //   -> E
     //   -> F
-    const graph = {
+    const graph: Graph = {
       id: '.',
       dependencies: [
         {
@@ -290,7 +290,7 @@ describe('hoist', () => {
       ],
     };
 
-    const hoistedGraph = {
+    const hoistedGraph: Graph = {
       id: '.',
       dependencies: [
         {
@@ -311,7 +311,7 @@ describe('hoist', () => {
       ],
     };
 
-    expect(hoist(graph as Package)).toEqual(hoistedGraph);
+    expect(hoist(graph)).toEqual(hoistedGraph);
   });
 
   it('should not hoisted to a place of previously hoisted dependency with conflicting version', () => {
@@ -323,7 +323,7 @@ describe('hoist', () => {
     //   -> B@X
     //   -> C@Y
     // B@Y cannot be hoisted further to A because it will take place of B@X in A, which result in a conflict
-    const graph = {
+    const graph: Graph = {
       id: '.',
       dependencies: [
         {
@@ -342,7 +342,7 @@ describe('hoist', () => {
       ],
     };
 
-    const hoistedGraph = {
+    const hoistedGraph: Graph = {
       id: '.',
       dependencies: [
         {
@@ -359,7 +359,7 @@ describe('hoist', () => {
       ],
     };
 
-    expect(hoist(graph as Package)).toEqual(hoistedGraph);
+    expect(hoist(graph)).toEqual(hoistedGraph);
   });
 
   it('should not break require promise by hoisting higher than the package with conflicting version', () => {
@@ -371,7 +371,7 @@ describe('hoist', () => {
     //   -> B@Y
     //   -> C@Y
     // The B@X cannot be hoisted to the top, because in this case the C@X will get B@Y instead of B@X when requiring B.
-    const graph = {
+    const graph: Graph = {
       id: '.',
       dependencies: [
         {
@@ -388,7 +388,7 @@ describe('hoist', () => {
       ],
     };
 
-    const hoistedGraph = {
+    const hoistedGraph: Graph = {
       id: '.',
       dependencies: [
         {
@@ -405,7 +405,7 @@ describe('hoist', () => {
       ],
     };
 
-    expect(hoist(graph as Package)).toEqual(hoistedGraph);
+    expect(hoist(graph)).toEqual(hoistedGraph);
   });
 
   it(`should properly hoist package that has several versions on the tree path`, () => {
@@ -423,7 +423,7 @@ describe('hoist', () => {
     //   -> C@X
     //   -> D@X
     //   -> E@X
-    const graph = {
+    const graph: Graph = {
       id: '.',
       dependencies: [
         {
@@ -456,7 +456,7 @@ describe('hoist', () => {
       ],
     };
 
-    const hoistedGraph = {
+    const hoistedGraph: Graph = {
       id: '.',
       dependencies: [
         {
@@ -477,7 +477,7 @@ describe('hoist', () => {
       ],
     };
 
-    expect(hoist(graph as Package)).toEqual(hoistedGraph);
+    expect(hoist(graph)).toEqual(hoistedGraph);
   });
 
   it(`should tolerate self-dependencies`, () => {
@@ -492,7 +492,7 @@ describe('hoist', () => {
     // . -> A -> B@X -> C@Y
     //   -> B@Y
     //   -> C@X
-    const graph = {
+    const graph: Graph = {
       id: '.',
       dependencies: [
         { id: '.' },
@@ -512,7 +512,7 @@ describe('hoist', () => {
       ],
     };
 
-    const hoistedGraph = {
+    const hoistedGraph: Graph = {
       id: '.',
       dependencies: [
         { id: '.' },
@@ -525,7 +525,7 @@ describe('hoist', () => {
       ],
     };
 
-    expect(hoist(graph as Package)).toEqual(hoistedGraph);
+    expect(hoist(graph)).toEqual(hoistedGraph);
   });
 
   it(`should support basic peer dependencies`, () => {
@@ -536,7 +536,7 @@ describe('hoist', () => {
     // . -> A -> B
     //        -> D@X
     //   -> D@Y
-    const graph = {
+    const graph: Graph = {
       id: '.',
       dependencies: [
         {
@@ -553,7 +553,7 @@ describe('hoist', () => {
       ],
     };
 
-    expect(hoist(graph as Package)).toEqual(graph);
+    expect(hoist(graph)).toEqual(graph);
   });
 
   it(`should hoist dependencies after hoisting peer dependency`, () => {
@@ -563,7 +563,7 @@ describe('hoist', () => {
     // . -> A
     //   -> B
     //   -> D@X
-    const graph = {
+    const graph: Graph = {
       id: '.',
       dependencies: [
         {
@@ -579,7 +579,7 @@ describe('hoist', () => {
       ],
     };
 
-    const hoistedGraph = {
+    const hoistedGraph: Graph = {
       id: '.',
       dependencies: [
         {
@@ -593,7 +593,7 @@ describe('hoist', () => {
       ],
     };
 
-    expect(hoist(graph as Package)).toEqual(hoistedGraph);
+    expect(hoist(graph)).toEqual(hoistedGraph);
   });
 
   it('should support basic cyclic peer dependencies', () => {
@@ -605,7 +605,7 @@ describe('hoist', () => {
     //   -> A
     //   -> B
     //   -> C
-    const graph = {
+    const graph: Graph = {
       id: '.',
       dependencies: [
         {
@@ -619,7 +619,7 @@ describe('hoist', () => {
       ],
     };
 
-    const hoistedGraph = {
+    const hoistedGraph: Graph = {
       id: '.',
       dependencies: [
         { id: 'A', peerNames: ['B'] },
@@ -629,7 +629,7 @@ describe('hoist', () => {
       ],
     };
 
-    expect(hoist(graph as Package)).toEqual(hoistedGraph);
+    expect(hoist(graph)).toEqual(hoistedGraph);
   });
 
   it('should support partially hoistable cyclic peer dependencies', () => {
@@ -645,7 +645,7 @@ describe('hoist', () => {
     //        -> B
     //        -> C
     //        -> E@Y
-    const graph = {
+    const graph: Graph = {
       id: '.',
       dependencies: [
         {
@@ -661,7 +661,7 @@ describe('hoist', () => {
       ],
     };
 
-    expect(hoist(graph as Package)).toEqual(graph);
+    expect(hoist(graph)).toEqual(graph);
   });
 
   it(`should respect transitive peer dependencies mixed with direct peer dependencies`, () => {
@@ -679,7 +679,7 @@ describe('hoist', () => {
     //   -> C@Y
     //   -> E
     // B and D cannot be hoisted to the top, otherwise they will use C@Y, instead of C@X
-    const graph = {
+    const graph: Graph = {
       id: '.',
       dependencies: [
         {
@@ -703,7 +703,7 @@ describe('hoist', () => {
       ],
     };
 
-    const hoistedGraph = {
+    const hoistedGraph: Graph = {
       id: '.',
       dependencies: [
         {
@@ -725,7 +725,7 @@ describe('hoist', () => {
       ],
     };
 
-    expect(hoist(graph as Package)).toEqual(hoistedGraph);
+    expect(hoist(graph)).toEqual(hoistedGraph);
   });
 
   it(`should support two branch circular graph hoisting`, () => {
@@ -743,7 +743,7 @@ describe('hoist', () => {
     //   -> E@X
     //   -> F@X
     // This graph with two similar circular branches should be hoisted in a finite time
-    const graph = {
+    const graph: Graph = {
       id: '.',
       dependencies: [
         {
@@ -779,7 +779,7 @@ describe('hoist', () => {
       ],
     };
 
-    const hoistedGraph = {
+    const hoistedGraph: Graph = {
       id: '.',
       dependencies: [
         { id: 'B' },
@@ -799,7 +799,7 @@ describe('hoist', () => {
       ],
     };
 
-    expect(hoist(graph as Package)).toEqual(hoistedGraph);
+    expect(hoist(graph)).toEqual(hoistedGraph);
   });
 
   it(`should hoist dependencies that peer depend on their parent`, () => {
@@ -808,7 +808,7 @@ describe('hoist', () => {
     // . -> A
     //   -> B
     //   -> C
-    const graph = {
+    const graph: Graph = {
       id: '.',
       dependencies: [
         {
@@ -828,7 +828,7 @@ describe('hoist', () => {
       ],
     };
 
-    const hoistedGraph = {
+    const hoistedGraph: Graph = {
       id: '.',
       dependencies: [
         { id: 'A' },
@@ -840,6 +840,6 @@ describe('hoist', () => {
       ],
     };
 
-    expect(hoist(graph as Package)).toEqual(hoistedGraph);
+    expect(hoist(graph)).toEqual(hoistedGraph);
   });
 });

@@ -11,19 +11,19 @@ export const PackageId = {
   root: '.' as PackageId,
 };
 
-export type Package = {
-  id: PackageId;
-  dependencies?: Package[];
-  workspaces?: Package[];
-  peerNames?: PackageName[];
+export type Graph = {
+  id: string;
+  dependencies?: Graph[];
+  workspaces?: Graph[];
+  peerNames?: string[];
   packageType?: PackageType;
 };
 
-export type Graph = {
+export type WorkGraph = {
   id: PackageId;
-  dependencies?: Map<PackageName, Graph>;
-  hoistedTo?: Map<PackageName, Graph>;
-  workspaces?: Map<PackageName, Graph>;
+  dependencies?: Map<PackageName, WorkGraph>;
+  hoistedTo?: Map<PackageName, WorkGraph>;
+  workspaces?: Map<PackageName, WorkGraph>;
   peerNames?: Set<PackageName>;
   packageType?: PackageType;
   firm: boolean;
@@ -31,28 +31,28 @@ export type Graph = {
 
 const EMPTY_MAP = new Map();
 
-const decoupleNode = (graph: Graph): Graph => {
-  if (graph['__decoupled']) return graph;
+const decoupleNode = (node: WorkGraph): WorkGraph => {
+  if (node['__decoupled']) return node;
 
-  const clone: Graph = { id: graph.id, firm: graph.firm };
+  const clone: WorkGraph = { id: node.id, firm: node.firm };
 
-  if (graph.packageType) {
-    clone.packageType = graph.packageType;
+  if (node.packageType) {
+    clone.packageType = node.packageType;
   }
 
-  if (graph.peerNames) {
-    clone.peerNames = new Set(graph.peerNames);
+  if (node.peerNames) {
+    clone.peerNames = new Set(node.peerNames);
   }
 
-  if (graph.workspaces) {
-    clone.workspaces = new Map(graph.workspaces);
+  if (node.workspaces) {
+    clone.workspaces = new Map(node.workspaces);
   }
 
-  if (graph.dependencies) {
-    clone.dependencies = new Map(graph.dependencies);
-    const nodeName = getPackageName(graph.id);
-    const selfNameDep = graph.dependencies.get(nodeName);
-    if (selfNameDep === graph) {
+  if (node.dependencies) {
+    clone.dependencies = new Map(node.dependencies);
+    const nodeName = getPackageName(node.id);
+    const selfNameDep = node.dependencies.get(nodeName);
+    if (selfNameDep === node) {
       clone.dependencies.set(nodeName, clone);
     }
   }
@@ -62,24 +62,25 @@ const decoupleNode = (graph: Graph): Graph => {
   return clone;
 };
 
-export const toGraph = (rootPkg: Package): Graph => {
-  const graph: Graph = {
-    id: rootPkg.id,
+export const toWorkGraph = (rootPkg: Graph): WorkGraph => {
+  const graph: WorkGraph = {
+    id: rootPkg.id as PackageId,
     firm: true,
   };
 
   Object.defineProperty(graph, '__decoupled', { value: true });
 
-  const seen = new Set<Package>();
+  const seen = new Set<Graph>();
 
   const visitDependency = (
-    pkg: Package,
-    parentNode: Graph,
-    parentNodes: Map<PackageId, Graph>,
+    pkg: Graph,
+    parentNode: WorkGraph,
+    parentNodes: Map<PackageId, WorkGraph>,
     { isWorkspaceDep }: { isWorkspaceDep: boolean }
   ) => {
     const isSeen = seen.has(pkg);
-    const newNode = pkg === rootPkg ? graph : parentNodes.get(pkg.id) || { id: pkg.id, firm: false };
+    const newNode =
+      pkg === rootPkg ? graph : parentNodes.get(pkg.id as PackageId) || { id: pkg.id as PackageId, firm: false };
     seen.add(pkg);
 
     if (pkg.packageType) {
@@ -87,11 +88,11 @@ export const toGraph = (rootPkg: Package): Graph => {
     }
 
     if (pkg.peerNames) {
-      newNode.peerNames = new Set(pkg.peerNames);
+      newNode.peerNames = new Set(pkg.peerNames as PackageName[]);
     }
 
     if (pkg !== rootPkg) {
-      const name = getPackageName(pkg.id);
+      const name = getPackageName(pkg.id as PackageId);
       if (isWorkspaceDep) {
         parentNode.workspaces = parentNode.workspaces || new Map();
         parentNode.workspaces.set(name, newNode);
@@ -102,7 +103,7 @@ export const toGraph = (rootPkg: Package): Graph => {
     }
 
     if (!isSeen) {
-      const nextParentNodes = new Map([...parentNodes.entries(), [pkg.id, newNode]]);
+      const nextParentNodes = new Map([...parentNodes.entries(), [pkg.id as PackageId, newNode]]);
       for (const workspaceDep of pkg.workspaces || []) {
         visitDependency(workspaceDep, newNode, nextParentNodes, { isWorkspaceDep: true });
       }
@@ -118,10 +119,14 @@ export const toGraph = (rootPkg: Package): Graph => {
   return graph;
 };
 
-export const toPackage = (graph: Graph): Package => {
-  const rootPkg: Package = { id: graph.id };
+const fromWorkGraph = (graph: WorkGraph): Graph => {
+  const rootPkg: Graph = { id: graph.id };
 
-  const visitDependency = (graphPath: Graph[], parentPkg: Package, { isWorkspaceDep }: { isWorkspaceDep: boolean }) => {
+  const visitDependency = (
+    graphPath: WorkGraph[],
+    parentPkg: Graph,
+    { isWorkspaceDep }: { isWorkspaceDep: boolean }
+  ) => {
     const node = graphPath[graphPath.length - 1];
     const newPkg = graphPath.length === 1 ? parentPkg : { id: node.id };
 
@@ -204,7 +209,7 @@ type HoistVerdict =
     };
 
 const getHoistVerdict = (
-  graphPath: Graph[],
+  graphPath: WorkGraph[],
   depName: PackageName,
   hoistPriorities: HoistPriorities,
   currentPriorityDepth: number
@@ -338,7 +343,7 @@ const getHoistVerdict = (
  * @param node graph node
  * @returns sorted regular dependencies
  */
-const getSortedRegularDependencies = (node: Graph, originalDepNames: Set<PackageName>): Set<PackageName> => {
+const getSortedRegularDependencies = (node: WorkGraph, originalDepNames: Set<PackageName>): Set<PackageName> => {
   const depNames: Set<PackageName> = new Set();
 
   const addDep = (depName: PackageName, seenDeps = new Set()) => {
@@ -372,7 +377,7 @@ const getSortedRegularDependencies = (node: Graph, originalDepNames: Set<Package
 };
 
 const hoistDependencies = (
-  graphPath: Graph[],
+  graphPath: WorkGraph[],
   hoistPriorities: HoistPriorities,
   currentPriorityDepth: number,
   depNames: Set<PackageName>,
@@ -481,8 +486,8 @@ type HoistOptions = {
   trace: boolean;
 };
 
-export const hoist = (pkg: Package, opts?: HoistOptions): Package => {
-  const graph = toGraph(pkg);
+export const hoist = (pkg: Graph, opts?: HoistOptions): Graph => {
+  const graph = toWorkGraph(pkg);
   const options = opts || { trace: false };
 
   const priorities = getHoistPriorities(graph);
@@ -496,7 +501,7 @@ export const hoist = (pkg: Package, opts?: HoistOptions): Package => {
   }
   let priorityDepth = 0;
 
-  const visitParent = (graphPath: Graph[]) => {
+  const visitParent = (graphPath: WorkGraph[]) => {
     const node = graphPath[graphPath.length - 1];
 
     if (node.dependencies) {
@@ -547,7 +552,7 @@ export const hoist = (pkg: Package, opts?: HoistOptions): Package => {
   for (priorityDepth = 1; priorityDepth < maxPriorityDepth; priorityDepth++) {
     while (hoistQueue[priorityDepth].length > 0) {
       const queueElement = hoistQueue[priorityDepth].shift()!;
-      const graphPath: Graph[] = [graph];
+      const graphPath: WorkGraph[] = [graph];
       let parentPkg = graphPath[graphPath.length - 1];
       for (const id of queueElement.graphPath.slice(1)) {
         const name = getPackageName(id);
@@ -589,5 +594,5 @@ export const hoist = (pkg: Package, opts?: HoistOptions): Package => {
     console.log(require('util').inspect(graph, false, null));
   }
 
-  return toPackage(graph);
+  return fromWorkGraph(graph);
 };

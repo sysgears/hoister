@@ -1,5 +1,5 @@
 import { getHoistPriorities } from '../src/priority';
-import { Package, toGraph } from '../src';
+import { Graph, toWorkGraph } from '../src';
 
 describe('priority', () => {
   it('should return priorities according to workspace nesting', () => {
@@ -8,7 +8,7 @@ describe('priority', () => {
     //   -> w2 -> C@2
     // should have priorites for C:
     // C@1, C@2, C@X
-    const pkg = {
+    const graph: Graph = {
       id: '.',
       dependencies: [{ id: 'A', dependencies: [{ id: 'C@X' }] }],
       workspaces: [
@@ -17,7 +17,7 @@ describe('priority', () => {
       ],
     };
 
-    expect(getHoistPriorities(toGraph(pkg as Package), { trace: true })).toEqual(
+    expect(getHoistPriorities(toWorkGraph(graph))).toEqual(
       new Map([
         ['.', ['.']],
         ['A', ['A']],
@@ -29,83 +29,37 @@ describe('priority', () => {
   });
 
   it('should prioritize direct workspace dependencies over indirect', () => {
-    const pkg = {
+    // . -> w1 -> A@X
+    //         -> B -> A@Y
+    //         -> C -> A@Y
+    // should prioritize A@X over A@Y
+    const graph: Graph = {
       id: '.',
       workspaces: [
         {
-          id: 'WA',
+          id: 'w1',
           dependencies: [
-            { id: 'D@1' },
+            { id: 'A@X' },
+            {
+              id: 'B',
+              dependencies: [{ id: 'A@Y' }],
+            },
             {
               id: 'C',
-              dependencies: [
-                {
-                  id: 'D@2',
-                  peerNames: ['PA'],
-                },
-              ],
+              dependencies: [{ id: 'A@Y' }],
             },
-            { id: 'PA' },
           ],
         },
       ],
     };
 
-    expect(getHoistPriorities(toGraph(pkg as Package))).toEqual(
+    expect(getHoistPriorities(toWorkGraph(graph))).toEqual(
       new Map([
         ['.', ['.']],
-        ['WA', ['WA']],
-        ['C', ['C']],
-        ['D', ['D@1', 'D@2']],
-        ['PA', ['PA']],
-      ])
-    );
-  });
-
-  it('should prioritize dependencies with more peer dependencies', () => {
-    const pkg = {
-      id: '.',
-      dependencies: [
-        { id: 'A', dependencies: [{ id: 'C@1', peerNames: ['PA'] }, { id: 'PA' }] },
-        { id: 'B', dependencies: [{ id: 'C@2', peerNames: ['PA', 'PB'] }, { id: 'PA' }, { id: 'PB' }] },
-      ],
-    };
-
-    expect(getHoistPriorities(toGraph(pkg as Package))).toEqual(
-      new Map([
-        ['.', ['.']],
+        ['w1', ['w1']],
+        ['A', ['A@X', 'A@Y']],
         ['B', ['B']],
-        ['A', ['A']],
-        ['C', ['C@2', 'C@1']],
-        ['PA', ['PA']],
-        ['PB', ['PB']],
-      ])
-    );
-  });
-
-  it('should prioritize direct portal dependencies over indirect dependencies', () => {
-    const pkg = {
-      id: '.',
-      dependencies: [
-        {
-          id: 'P',
-          dependencies: [
-            {
-              id: 'A',
-              dependencies: [{ id: 'B@2' }],
-            },
-            { id: 'B@1' },
-          ],
-        },
-      ],
-    };
-
-    expect(getHoistPriorities(toGraph(pkg as Package))).toEqual(
-      new Map([
-        ['.', ['.']],
-        ['A', ['A']],
-        ['B', ['B@1', 'B@2']],
-        ['P', ['P']],
+        ['C', ['C']],
       ])
     );
   });
