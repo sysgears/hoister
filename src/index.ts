@@ -115,13 +115,6 @@ export const toGraph = (rootPkg: Package): Graph => {
 
   visitDependency(rootPkg, graph, new Map(), { isWorkspaceDep: true });
 
-  // console.log(
-  //   'pkg',
-  //   require('util').inspect(rootPkg, false, null),
-  //   'graph',
-  //   require('util').inspect(graph, false, null)
-  // );
-
   return graph;
 };
 
