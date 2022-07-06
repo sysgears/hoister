@@ -5,7 +5,13 @@ export type HoistPriorities = Map<PackageName, PackageId[]>;
 
 const EMPTY_SET = new Set();
 
-export const getHoistPriorities = (graph: Graph): HoistPriorities => {
+type PriorityOptions = {
+  trace: boolean;
+};
+
+export const getHoistPriorities = (graph: Graph, opts?: PriorityOptions): HoistPriorities => {
+  const options = opts || { trace: false };
+
   const priorities = new Map();
   const workspaceLevels = new Map<PackageId, number>();
   let maxWorkspaceLevel = 0;
@@ -106,6 +112,11 @@ export const getHoistPriorities = (graph: Graph): HoistPriorities => {
       priorities.set(pkgName, priorityList);
     }
     priorityList.push(pkgId);
+  }
+
+  if (options.trace) {
+    console.log('metrics:', require('util').inspect(packageMetrics, false, null));
+    console.log('priorities', require('util').inspect(priorities, false, null));
   }
 
   return priorities;

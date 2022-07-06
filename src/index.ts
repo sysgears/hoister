@@ -376,7 +376,7 @@ const hoistDependencies = (
   hoistPriorities: HoistPriorities,
   currentPriorityDepth: number,
   depNames: Set<PackageName>,
-  options: Options,
+  options: HoistOptions,
   hoistQueue?: HoistQueue
 ) => {
   const parentPkg = graphPath[graphPath.length - 1];
@@ -477,11 +477,11 @@ const hoistDependencies = (
   }
 };
 
-type Options = {
+type HoistOptions = {
   trace: boolean;
 };
 
-export const hoist = (pkg: Package, opts?: Options): Package => {
+export const hoist = (pkg: Package, opts?: HoistOptions): Package => {
   const graph = toGraph(pkg);
   const options = opts || { trace: false };
 

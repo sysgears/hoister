@@ -3,21 +3,27 @@ import { Package, toGraph } from '../src';
 
 describe('priority', () => {
   it('should return priorities according to workspace nesting', () => {
+    // . -> A -> C@X
+    //   -> w1 -> C@1
+    //   -> w2 -> C@2
+    // should have priorites for C:
+    // C@1, C@2, C@X
     const pkg = {
       id: '.',
+      dependencies: [{ id: 'A', dependencies: [{ id: 'C@X' }] }],
       workspaces: [
-        { id: 'A', workspaces: [{ id: 'C' }] },
-        { id: 'B', workspaces: [{ id: 'D' }] },
+        { id: 'w1', workspaces: [{ id: 'C@1' }] },
+        { id: 'w2', workspaces: [{ id: 'C@2' }] },
       ],
     };
 
-    expect(getHoistPriorities(toGraph(pkg as Package))).toEqual(
+    expect(getHoistPriorities(toGraph(pkg as Package), { trace: true })).toEqual(
       new Map([
         ['.', ['.']],
         ['A', ['A']],
-        ['B', ['B']],
-        ['C', ['C']],
-        ['D', ['D']],
+        ['w1', ['w1']],
+        ['w2', ['w2']],
+        ['C', ['C@1', 'C@2', 'C@X']],
       ])
     );
   });
