@@ -251,11 +251,11 @@ describe('hoist', () => {
     //        -> D@Y
     //   -> B@Y
     //   -> E -> C@Y
-    //        -> D@X
+    //        -> D@Y
     //   -> F -> C@Y
     // should be hoisted to:
-    // . -> A -> B@X -> C@X
-    //               -> D@X
+    // . -> A -> B@X
+    //        -> C@X -> D@X
     //        -> D@Y
     //   -> B@Y
     //   -> C@Y
@@ -285,7 +285,7 @@ describe('hoist', () => {
           ],
         },
         { id: 'B@Y' },
-        { id: 'E', dependencies: [{ id: 'C@Y' }, { id: 'D@X' }] },
+        { id: 'E', dependencies: [{ id: 'C@Y' }, { id: 'D@Y' }] },
         { id: 'F', dependencies: [{ id: 'C@Y' }] },
       ],
     };
@@ -296,16 +296,16 @@ describe('hoist', () => {
         {
           id: 'A',
           dependencies: [
+            { id: 'B@X' },
             {
-              id: 'B@X',
-              dependencies: [{ id: 'C@X' }, { id: 'D@X' }],
+              id: 'C@X',
+              dependencies: [{ id: 'D@X' }],
             },
-            { id: 'D@Y' },
           ],
         },
         { id: 'B@Y' },
         { id: 'C@Y' },
-        { id: 'D@X' },
+        { id: 'D@Y' },
         { id: 'E' },
         { id: 'F' },
       ],
@@ -408,49 +408,77 @@ describe('hoist', () => {
     expect(hoist(graph as Package)).toEqual(hoistedGraph);
   });
 
-  // it(`should properly hoist package that has several versions on the tree path`, () => {
-  //   // . -> A -> B@X -> C@Y
-  //   //               -> D@Y -> E@Y -> C@X
-  //   //   -> B@Y
-  //   //   -> D@X
-  //   //   -> E@Y
-  //   // should be hoisted to:
-  //   // . -> A -> B@X
-  //   //        -> C@Y
-  //   const graph = {
-  //     id: '.',
-  //     dependencies: [
-  //       {
-  //         id: 'A',
-  //         dependencies: [
-  //           {
-  //             id: 'B@X',
-  //             dependencies: [
-  //               {
-  //                 id: 'C',
-  //                 dependencies: [{ id: 'B@Y' }],
-  //               },
-  //             ],
-  //           },
-  //         ],
-  //       },
-  //     ],
-  //   };
+  it(`should properly hoist package that has several versions on the tree path`, () => {
+    // . -> A -> B@X -> C@Y -> E@X
+    //               -> D@Y -> E@Y -> C@X
+    //   -> B@Y
+    //   -> C@X
+    //   -> D@X
+    //   -> E@X
+    // should be hoisted to:
+    // . -> A -> B@X -> C@Y
+    //        -> D@Y
+    //        -> E@Y
+    //   -> B@Y
+    //   -> C@X
+    //   -> D@X
+    //   -> E@X
+    const graph = {
+      id: '.',
+      dependencies: [
+        {
+          id: 'A',
+          dependencies: [
+            {
+              id: 'B@X',
+              dependencies: [
+                {
+                  id: 'C@Y',
+                  dependencies: [{ id: 'E@X' }],
+                },
+                {
+                  id: 'D@Y',
+                  dependencies: [
+                    {
+                      id: 'E@Y',
+                      dependencies: [{ id: 'C@X' }],
+                    },
+                  ],
+                },
+              ],
+            },
+          ],
+        },
+        { id: 'B@Y' },
+        { id: 'C@X' },
+        { id: 'D@X' },
+        { id: 'E@X' },
+      ],
+    };
 
-  //   const hoistedGraph = {
-  //     id: '.',
-  //     dependencies: [
-  //       { id: 'A' },
-  //       { id: 'B@X' },
-  //       {
-  //         id: 'C',
-  //         dependencies: [{ id: 'B@Y' }],
-  //       },
-  //     ],
-  //   };
+    const hoistedGraph = {
+      id: '.',
+      dependencies: [
+        {
+          id: 'A',
+          dependencies: [
+            {
+              id: 'B@X',
+              dependencies: [{ id: 'C@Y' }],
+            },
+            { id: 'D@Y' },
+            { id: 'E@Y' },
+          ],
+        },
+        { id: 'B@Y' },
+        { id: 'C@X' },
+        { id: 'D@X' },
+        { id: 'E@X' },
+      ],
+    };
 
-  //   expect(hoist(graph as Package)).toEqual(hoistedGraph);
-  // });
+    expect(hoist(graph as Package)).toEqual(hoistedGraph);
+  });
 
   it(`should tolerate self-dependencies`, () => {
     // . -> .
