@@ -4,7 +4,7 @@ import { getHoistPriorities, HoistPriorities } from './priority';
 export type PackageId = string & { _packageId: true };
 export type PackageName = string & { _packageName: true };
 export enum PackageType {
-  PORTAL,
+  PORTAL = 'PORTAL',
 }
 
 export const PackageId = {

@@ -3,8 +3,6 @@ import { getPackageName } from './parse';
 
 export type HoistPriorities = Map<PackageName, PackageId[]>;
 
-const EMPTY_SET = new Set();
-
 type PriorityOptions = {
   trace: boolean;
 };
@@ -39,18 +37,18 @@ export const getHoistPriorities = (graph: WorkGraph, opts?: PriorityOptions): Ho
 
   const seen = new Set();
   const visitDependency = (
-    pkg: WorkGraph,
-    parentPkg: WorkGraph,
+    graphPath: WorkGraph[],
     options: { workspaceLevel: number; isDirectDependency: boolean }
   ) => {
-    if (seen.has(pkg)) return;
+    const pkg = graphPath[graphPath.length - 1];
+    const isSeen = seen.has(pkg);
     seen.add(pkg);
 
     let metrics = packageMetrics.get(pkg.id);
     if (!metrics) {
       metrics = {
         directDependencyLevel: maxWorkspaceLevel + 1,
-        parents: new Set(),
+        usedBy: new Set(),
       };
       packageMetrics.set(pkg.id, metrics);
     }
@@ -58,11 +56,33 @@ export const getHoistPriorities = (graph: WorkGraph, opts?: PriorityOptions): Ho
     if (options.isDirectDependency && options.workspaceLevel < metrics.directDependencyLevel) {
       metrics.directDependencyLevel = options.workspaceLevel;
     }
-    if (pkg !== graph) {
-      metrics.parents.add(parentPkg);
+    if (graphPath.length > 1) {
+      metrics.usedBy.add(graphPath[graphPath.length - 2]);
     }
 
-    let workspaceLevel, isDirectDependency;
+    if (pkg.peerNames) {
+      for (const peerName of pkg.peerNames) {
+        let peerDep;
+        for (let idx = graphPath.length - 2; idx >= 0; idx--) {
+          peerDep = graphPath[idx].dependencies?.get(peerName);
+          if (peerDep) {
+            let metrics = packageMetrics.get(peerDep.id);
+            if (!metrics) {
+              metrics = {
+                directDependencyLevel: maxWorkspaceLevel + 1,
+                usedBy: new Set(),
+              };
+              packageMetrics.set(peerDep.id, metrics);
+            }
+            metrics.usedBy.add(pkg);
+            break;
+          }
+        }
+      }
+    }
+
+    let workspaceLevel = options.workspaceLevel;
+    let isDirectDependency;
     const nextWorkspaceLevel = workspaceLevels.get(pkg.id);
     if (nextWorkspaceLevel) {
       workspaceLevel = nextWorkspaceLevel;
@@ -73,20 +93,26 @@ export const getHoistPriorities = (graph: WorkGraph, opts?: PriorityOptions): Ho
       isDirectDependency = false;
     }
 
-    if (pkg.workspaces) {
-      for (const dep of pkg.workspaces.values()) {
-        visitDependency(dep, pkg, { workspaceLevel, isDirectDependency });
+    if (!isSeen) {
+      if (pkg.workspaces) {
+        for (const dep of pkg.workspaces.values()) {
+          graphPath.push(dep);
+          visitDependency(graphPath, { workspaceLevel, isDirectDependency });
+          graphPath.pop();
+        }
       }
-    }
 
-    if (pkg.dependencies) {
-      for (const dep of pkg.dependencies.values()) {
-        visitDependency(dep, pkg, { workspaceLevel, isDirectDependency });
+      if (pkg.dependencies) {
+        for (const dep of pkg.dependencies.values()) {
+          graphPath.push(dep);
+          visitDependency(graphPath, { workspaceLevel, isDirectDependency });
+          graphPath.pop();
+        }
       }
     }
   };
 
-  visitDependency(graph, graph, { workspaceLevel: 1, isDirectDependency: true });
+  visitDependency([graph], { workspaceLevel: 1, isDirectDependency: true });
 
   const pkgIds = Array.from(packageMetrics.keys());
   pkgIds.sort((id1, id2) => {
@@ -94,8 +120,8 @@ export const getHoistPriorities = (graph: WorkGraph, opts?: PriorityOptions): Ho
     const pkg2 = packageMetrics.get(id2);
     if (pkg2.directDependencyLevel !== pkg1.directDependencyLevel) {
       return pkg1.directDependencyLevel - pkg2.directDependencyLevel;
-    } else if (pkg2.parents.size !== pkg1.parents.size) {
-      return pkg2.parents.size - pkg1.parents.size;
+    } else if (pkg2.usedBy.size !== pkg1.usedBy.size) {
+      return pkg2.usedBy.size - pkg1.usedBy.size;
     } else {
       return id2 > id1 ? -1 : 1;
     }
@@ -112,6 +138,7 @@ export const getHoistPriorities = (graph: WorkGraph, opts?: PriorityOptions): Ho
   }
 
   if (options.trace) {
+    console.log('workspace levels:', require('util').inspect(workspaceLevels, false, null));
     console.log('metrics:', require('util').inspect(packageMetrics, false, 3));
     console.log('priorities', require('util').inspect(priorities, false, null));
   }
