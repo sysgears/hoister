@@ -254,8 +254,8 @@ describe('hoist', () => {
     //        -> D@Y
     //   -> F -> C@Y
     // should be hoisted to:
-    // . -> A -> B@X
-    //        -> C@X -> D@X
+    // . -> A -> B@X -> C@X
+    //               -> D@X
     //        -> D@Y
     //   -> B@Y
     //   -> C@Y
@@ -296,10 +296,9 @@ describe('hoist', () => {
         {
           id: 'A',
           dependencies: [
-            { id: 'B@X' },
             {
-              id: 'C@X',
-              dependencies: [{ id: 'D@X' }],
+              id: 'B@X',
+              dependencies: [{ id: 'C@X' }, { id: 'D@X' }],
             },
           ],
         },
@@ -417,8 +416,7 @@ describe('hoist', () => {
     //   -> E@X
     // should be hoisted to:
     // . -> A -> B@X -> C@Y
-    //        -> D@Y
-    //        -> E@Y
+    //        -> D@Y -> E@Y
     //   -> B@Y
     //   -> C@X
     //   -> D@X
@@ -466,8 +464,7 @@ describe('hoist', () => {
               id: 'B@X',
               dependencies: [{ id: 'C@Y' }],
             },
-            { id: 'D@Y' },
-            { id: 'E@Y' },
+            { id: 'D@Y', dependencies: [{ id: 'E@Y' }] },
           ],
         },
         { id: 'B@Y' },
