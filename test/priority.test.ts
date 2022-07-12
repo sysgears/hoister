@@ -1,4 +1,4 @@
-import { getHoistPriorities, getUsages } from '../src/priority';
+import { getChildren, getUsages, getPriorities } from '../src/priority';
 import { Graph, PackageType, toWorkGraph } from '../src';
 
 describe('priority', () => {
@@ -75,9 +75,12 @@ describe('priority', () => {
       ],
     };
 
-    expect(getHoistPriorities(toWorkGraph(graph))).toEqual(
+    const workGraph = toWorkGraph(graph);
+    const usages = getUsages(workGraph);
+    const children = getChildren(workGraph);
+
+    expect(getPriorities(usages, children)).toEqual(
       new Map([
-        ['.', ['.']],
         ['A', ['A']],
         ['w1', ['w1']],
         ['w2', ['w2']],
@@ -111,9 +114,12 @@ describe('priority', () => {
       ],
     };
 
-    expect(getHoistPriorities(toWorkGraph(graph))).toEqual(
+    const workGraph = toWorkGraph(graph);
+    const usages = getUsages(workGraph);
+    const children = getChildren(workGraph);
+
+    expect(getPriorities(usages, children)).toEqual(
       new Map([
-        ['.', ['.']],
         ['w1', ['w1']],
         ['A', ['A@X', 'A@Y']],
         ['B', ['B']],
@@ -150,9 +156,12 @@ describe('priority', () => {
       ],
     };
 
-    expect(getHoistPriorities(toWorkGraph(graph))).toEqual(
+    const workGraph = toWorkGraph(graph);
+    const usages = getUsages(workGraph);
+    const children = getChildren(workGraph);
+
+    expect(getPriorities(usages, children)).toEqual(
       new Map([
-        ['.', ['.']],
         ['A', ['A@Y', 'A@X']],
         ['B', ['B']],
         ['C', ['C']],
@@ -162,29 +171,41 @@ describe('priority', () => {
   });
 
   it(`should give priority to portal dependencies`, () => {
-    // . -> w1 -> p1 -> B@Y
-    //         -> A -> B@X
-    // B@Y should be prioritized over B@X, because it is a direct dependency of the portal
+    // . -> A -> B@X
+    //   -> p1 -> B@Z
+    //   -> w1 -> B@Y
+    // B@Z should be prioritized over B@Y, which should be prioritized over B@X
     const graph: Graph = {
       id: '.',
+      dependencies: [
+        {
+          id: 'A',
+          dependencies: [{ id: 'B@X' }],
+        },
+        {
+          id: 'p1',
+          dependencies: [{ id: 'B@Z' }],
+          packageType: PackageType.PORTAL,
+        },
+      ],
       workspaces: [
         {
           id: 'w1',
-          dependencies: [
-            { id: 'p1', dependencies: [{ id: 'B@Y' }], packageType: PackageType.PORTAL },
-            { id: 'A', dependencies: [{ id: 'B@X' }] },
-          ],
+          dependencies: [{ id: 'B@Y' }],
         },
       ],
     };
 
-    expect(getHoistPriorities(toWorkGraph(graph))).toEqual(
+    const workGraph = toWorkGraph(graph);
+    const usages = getUsages(workGraph);
+    const children = getChildren(workGraph);
+
+    expect(getPriorities(usages, children)).toEqual(
       new Map([
-        ['.', ['.']],
         ['p1', ['p1']],
         ['w1', ['w1']],
         ['A', ['A']],
-        ['B', ['B@Y', 'B@X']],
+        ['B', ['B@Z', 'B@Y', 'B@X']],
       ])
     );
   });
