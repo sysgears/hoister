@@ -1,5 +1,5 @@
 import { getPackageName } from './parse';
-import { getHoistPriorities, HoistPriorities } from './priority';
+import { getHoistPriorities, HoistPriorities, DetailedHoistPriorities } from './priority';
 
 export type PackageId = string & { _packageId: true };
 export type PackageName = string & { _packageName: true };
@@ -26,6 +26,7 @@ export type WorkGraph = {
   workspaces?: Map<PackageName, WorkGraph>;
   peerNames?: Set<PackageName>;
   packageType?: PackageType;
+  priorities?: DetailedHoistPriorities;
   firm: boolean;
 };
 
@@ -35,6 +36,10 @@ const decoupleNode = (node: WorkGraph): WorkGraph => {
   if (node['__decoupled']) return node;
 
   const clone: WorkGraph = { id: node.id, firm: node.firm };
+
+  if (node.priorities) {
+    clone.priorities = node.priorities;
+  }
 
   if (node.packageType) {
     clone.packageType = node.packageType;

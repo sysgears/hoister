@@ -1,7 +1,65 @@
-import { getHoistPriorities } from '../src/priority';
+import { getHoistPriorities, getUsages } from '../src/priority';
 import { Graph, PackageType, toWorkGraph } from '../src';
 
 describe('priority', () => {
+  it(`should compute usages for repetetive package occurences`, () => {
+    // . -> A -> B -> C
+    //   -> D -> B -> C
+    const B = { id: 'B', dependencies: [{ id: 'C' }] };
+    const graph: Graph = {
+      id: '.',
+      dependencies: [
+        { id: 'A', dependencies: [B] },
+        { id: 'D', dependencies: [B] },
+      ],
+    };
+
+    expect(getUsages(toWorkGraph(graph))).toEqual(
+      new Map([
+        ['.', new Set()],
+        ['A', new Set(['.'])],
+        ['B', new Set(['A', 'D'])],
+        ['C', new Set(['B'])],
+        ['D', new Set(['.'])],
+      ])
+    );
+  });
+
+  it(`should compute usages for peer dependencies`, () => {
+    // . -> A -> B -> C --> D
+    //             -> D
+    const graph: Graph = {
+      id: '.',
+      dependencies: [
+        {
+          id: 'A',
+          dependencies: [
+            {
+              id: 'B',
+              dependencies: [
+                {
+                  id: 'C',
+                  peerNames: ['D'],
+                },
+                { id: 'D' },
+              ],
+            },
+          ],
+        },
+      ],
+    };
+
+    expect(getUsages(toWorkGraph(graph))).toEqual(
+      new Map([
+        ['.', new Set()],
+        ['A', new Set(['.'])],
+        ['B', new Set(['A'])],
+        ['C', new Set(['B'])],
+        ['D', new Set(['C', 'B'])],
+      ])
+    );
+  });
+
   it('should return priorities according to workspace nesting', () => {
     // . -> A -> C@X
     //   -> w1 -> C@1
