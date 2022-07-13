@@ -1,4 +1,4 @@
-import { Graph, hoist } from '../src';
+import { Graph, hoist, PackageType } from '../src';
 
 describe('hoist', () => {
   it('should do very basic hoisting', () => {
@@ -834,6 +834,103 @@ describe('hoist', () => {
           peerNames: ['A'],
         },
         { id: 'C' },
+      ],
+    };
+
+    expect(hoist(graph)).toEqual(hoistedGraph);
+  });
+
+  it('should support portals with contradicting hoist priorities in different parts of the graph', () => {
+    // . -> w1 -> A@X -> E@Y
+    //         -> B@X -> E@Y
+    //         -> p1@X -> E@X
+    //   -> w2 -> C@X -> E@X
+    //         -> D@X -> E@X
+    //         -> p2@X -> E@Y
+    //   -> A@Y
+    //   -> B@Y
+    //   -> C@Y
+    //   -> D@Y
+    //   -> E@Z
+    //   -> p1@Y
+    //   -> p2@Y
+    // should be hoisted to:
+    // . -> w1 -> A@X -> E@Y
+    //         -> B@X -> E@Y
+    //         -> E@X
+    //         -> p1@X
+    //   -> w2 -> C@X -> E@X
+    //         -> D@X -> E@X
+    //         -> E@Y
+    //         -> p2@X
+    //   -> A@Y
+    //   -> B@Y
+    //   -> C@Y
+    //   -> D@Y
+    //   -> E@Z
+    //   -> p1@Y
+    //   -> p2@Y
+    const graph: Graph = {
+      id: '.',
+      workspaces: [
+        {
+          id: 'w1',
+          dependencies: [
+            { id: 'p1@X', dependencies: [{ id: 'E@X' }], packageType: PackageType.PORTAL },
+            { id: 'A@X', dependencies: [{ id: 'E@Y' }] },
+            { id: 'B@X', dependencies: [{ id: 'E@Y' }] },
+          ],
+        },
+        {
+          id: 'w2',
+          dependencies: [
+            { id: 'p2@X', dependencies: [{ id: 'E@Y' }], packageType: PackageType.PORTAL },
+            { id: 'C@X', dependencies: [{ id: 'E@X' }] },
+            { id: 'D@X', dependencies: [{ id: 'E@X' }] },
+          ],
+        },
+      ],
+      dependencies: [
+        { id: 'A@Y' },
+        { id: 'B@Y' },
+        { id: 'C@Y' },
+        { id: 'D@Y' },
+        { id: 'E@Z' },
+        { id: 'p1@Y' },
+        { id: 'p2@Y' },
+      ],
+    };
+
+    const hoistedGraph: Graph = {
+      id: '.',
+      workspaces: [
+        {
+          id: 'w1',
+          dependencies: [
+            { id: 'A@X', dependencies: [{ id: 'E@Y' }] },
+            { id: 'B@X', dependencies: [{ id: 'E@Y' }] },
+            { id: 'E@X' },
+            { id: 'p1@X', packageType: PackageType.PORTAL },
+          ],
+        },
+        {
+          id: 'w2',
+          dependencies: [
+            { id: 'C@X', dependencies: [{ id: 'E@X' }] },
+            { id: 'D@X', dependencies: [{ id: 'E@X' }] },
+            { id: 'E@Y' },
+            { id: 'p2@X', packageType: PackageType.PORTAL },
+          ],
+        },
+      ],
+      dependencies: [
+        { id: 'A@Y' },
+        { id: 'B@Y' },
+        { id: 'C@Y' },
+        { id: 'D@Y' },
+        { id: 'E@Z' },
+        { id: 'p1@Y' },
+        { id: 'p2@Y' },
       ],
     };
 
