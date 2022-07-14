@@ -936,4 +936,53 @@ describe('hoist', () => {
 
     expect(hoist(graph)).toEqual(hoistedGraph);
   });
+
+  it('should support aliases hoisting', () => {
+    // . -> A@X -> B -> C(A@X)
+    //   -> C@Y
+    // should be hoisted to:
+    // . -> A@X -> B
+    //          -> C(A@X)
+    //   -> C@Y
+    const graph: Graph = {
+      id: '.',
+      dependencies: [
+        {
+          id: 'A@X',
+          dependencies: [
+            {
+              id: 'B',
+              dependencies: [
+                {
+                  id: 'A@X',
+                  alias: 'C',
+                },
+              ],
+            },
+          ],
+        },
+        { id: 'C@Y' },
+      ],
+    };
+
+    const hoistedGraph: Graph = {
+      id: '.',
+      dependencies: [
+        {
+          id: 'A@X',
+        },
+        {
+          id: 'B',
+          dependencies: [
+            {
+              id: 'A@X',
+              alias: 'C',
+            },
+          ],
+        },
+        { id: 'C@Y' },
+      ],
+    };
+    expect(hoist(graph, { trace: true })).toEqual(hoistedGraph);
+  });
 });

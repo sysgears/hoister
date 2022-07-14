@@ -13,6 +13,7 @@ export const PackageId = {
 
 export type Graph = {
   id: string;
+  alias?: string;
   dependencies?: Graph[];
   workspaces?: Graph[];
   peerNames?: string[];
@@ -63,9 +64,18 @@ const decoupleNode = (node: WorkGraph): WorkGraph => {
   return clone;
 };
 
+const getAliasedId = (pkg: Graph): PackageId =>
+  !pkg.alias ? (pkg.id as PackageId) : (`${pkg.alias}@>${pkg.id}` as PackageId);
+
+const fromAliasedId = (aliasedId: PackageId): { alias?: PackageName; id: PackageId } => {
+  const alias = getPackageName(aliasedId);
+  const idIndex = aliasedId.indexOf('@>', alias.length);
+  return idIndex < 0 ? { id: aliasedId } : { alias, id: aliasedId.substring(idIndex + 2) as PackageId };
+};
+
 export const toWorkGraph = (rootPkg: Graph): WorkGraph => {
   const graph: WorkGraph = {
-    id: rootPkg.id as PackageId,
+    id: getAliasedId(rootPkg),
     firm: true,
   };
 
@@ -80,8 +90,8 @@ export const toWorkGraph = (rootPkg: Graph): WorkGraph => {
     { isWorkspaceDep }: { isWorkspaceDep: boolean }
   ) => {
     const isSeen = seen.has(pkg);
-    const newNode =
-      pkg === rootPkg ? graph : parentNodes.get(pkg.id as PackageId) || { id: pkg.id as PackageId, firm: false };
+    const aliasedId = getAliasedId(pkg);
+    const newNode = pkg === rootPkg ? graph : parentNodes.get(aliasedId) || { id: aliasedId, firm: false };
     seen.add(pkg);
 
     if (pkg.packageType) {
@@ -121,7 +131,7 @@ export const toWorkGraph = (rootPkg: Graph): WorkGraph => {
 };
 
 const fromWorkGraph = (graph: WorkGraph): Graph => {
-  const rootPkg: Graph = { id: graph.id };
+  const rootPkg: Graph = { id: fromAliasedId(graph.id).id };
 
   const visitDependency = (
     graphPath: WorkGraph[],
@@ -129,7 +139,16 @@ const fromWorkGraph = (graph: WorkGraph): Graph => {
     { isWorkspaceDep }: { isWorkspaceDep: boolean }
   ) => {
     const node = graphPath[graphPath.length - 1];
-    const newPkg = graphPath.length === 1 ? parentPkg : { id: node.id };
+    let newPkg;
+    if (graphPath.length === 1) {
+      newPkg = parentPkg;
+    } else {
+      const { alias, id } = fromAliasedId(node.id);
+      newPkg = { id };
+      if (alias) {
+        newPkg.alias = alias;
+      }
+    }
 
     if (node.packageType) {
       newPkg.packageType = node.packageType;
