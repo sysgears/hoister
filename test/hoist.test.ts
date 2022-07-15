@@ -983,6 +983,6 @@ describe('hoist', () => {
         { id: 'C@Y' },
       ],
     };
-    expect(hoist(graph, { trace: true })).toEqual(hoistedGraph);
+    expect(hoist(graph)).toEqual(hoistedGraph);
   });
 });
