@@ -18,6 +18,7 @@ export type Graph = {
   workspaces?: Graph[];
   peerNames?: string[];
   packageType?: PackageType;
+  wall?: boolean;
 };
 
 export type WorkGraph = {
@@ -28,6 +29,7 @@ export type WorkGraph = {
   peerNames?: Set<PackageName>;
   packageType?: PackageType;
   priority?: number;
+  wall?: boolean;
 };
 
 const EMPTY_MAP = new Map();
@@ -43,6 +45,10 @@ const decoupleNode = (node: WorkGraph): WorkGraph => {
 
   if (node.peerNames) {
     clone.peerNames = new Set(node.peerNames);
+  }
+
+  if (node.wall) {
+    clone.wall = node.wall;
   }
 
   if (node.workspaces) {
@@ -100,6 +106,10 @@ export const toWorkGraph = (rootPkg: Graph): WorkGraph => {
       newNode.peerNames = new Set(pkg.peerNames as PackageName[]);
     }
 
+    if (pkg.wall) {
+      newNode.wall = pkg.wall;
+    }
+
     if (pkg !== rootPkg) {
       const name = getPackageName(pkg.id as PackageId);
       if (isWorkspaceDep) {
@@ -154,6 +164,10 @@ const fromWorkGraph = (graph: WorkGraph): Graph => {
 
     if (node.peerNames) {
       newPkg.peerNames = Array.from(node.peerNames);
+    }
+
+    if (node.wall) {
+      newPkg.wall = node.wall;
     }
 
     if (graphPath.length > 1) {
@@ -240,9 +254,10 @@ const getHoistVerdict = (
   let newParentIndex;
 
   let waterMark;
-  for (waterMark = graphPath.length - 2; waterMark > 0; waterMark--) {
+  for (waterMark = graphPath.length - 1; waterMark > 0; waterMark--) {
     let newParentIdx = waterMark;
     const newParentPkg = graphPath[waterMark];
+    if (newParentPkg.wall) break;
     const hoistedParent = newParentPkg?.hoistedTo?.get(depName);
     if (hoistedParent) {
       newParentIdx = graphPath.indexOf(hoistedParent);
@@ -251,14 +266,16 @@ const getHoistVerdict = (
     const newParentDep = newParentPkg.dependencies?.get(depName);
     if (newParentDep && newParentDep.id !== dep.id) {
       waterMark = newParentIdx + 1;
-      if (waterMark === graphPath.length - 1) {
-        isHoistable = Hoistable.NO;
-      } else if (newParentDep.priority) {
+      if (newParentDep.priority) {
         isHoistable = Hoistable.LATER;
         priorityDepth = newParentDep.priority;
       }
       break;
     }
+  }
+
+  if (waterMark === graphPath.length - 1) {
+    isHoistable = Hoistable.NO;
   }
 
   if (isHoistable === Hoistable.YES) {

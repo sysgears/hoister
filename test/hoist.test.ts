@@ -983,6 +983,55 @@ describe('hoist', () => {
         { id: 'C@Y' },
       ],
     };
+
+    expect(hoist(graph)).toEqual(hoistedGraph);
+  });
+
+  it('should support hoist walls', () => {
+    // . -> D -> A| -> B -> C
+    // should be hoisted to:
+    // . -> A -> B
+    //        -> C
+    //   -> D
+    const graph: Graph = {
+      id: '.',
+      dependencies: [
+        {
+          id: 'D',
+          dependencies: [
+            {
+              id: 'A',
+              wall: true,
+              dependencies: [
+                {
+                  id: 'B',
+                  dependencies: [
+                    {
+                      id: 'C',
+                    },
+                  ],
+                },
+              ],
+            },
+          ],
+        },
+      ],
+    };
+
+    const hoistedGraph: Graph = {
+      id: '.',
+      dependencies: [
+        {
+          id: 'A',
+          wall: true,
+          dependencies: [{ id: 'B' }, { id: 'C' }],
+        },
+        {
+          id: 'D',
+        },
+      ],
+    };
+
     expect(hoist(graph)).toEqual(hoistedGraph);
   });
 });
