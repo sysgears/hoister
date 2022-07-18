@@ -124,7 +124,7 @@ describe('hoist', () => {
         { id: 'A', dependencies: [{ id: 'B@X', dependencies: [{ id: 'C@X' }] }, { id: 'C@Y' }] },
         { id: 'B@Y' },
         { id: 'C@Z' },
-        { id: 'D', dependencies: [{ id: 'B@X' }] },
+        { id: 'D', dependencies: [{ id: 'B@X' }, { id: 'C@X' }] },
       ],
     };
 
@@ -1032,6 +1032,22 @@ describe('hoist', () => {
       ],
     };
 
-    expect(hoist(graph, { trace: true })).toEqual(hoistedGraph);
+    expect(hoist(graph)).toEqual(hoistedGraph);
+  });
+
+  it('should hoist workspaces based on their nesting', () => {
+    // . -> B@Y
+    //   -> w1@X
+    //   -> w1 -> B@X
+    //   -> w2 -> w1 -> B@X
+    // should not be changed by hoisting
+    const w1 = { id: 'w1', dependencies: [{ id: 'B@X' }] };
+    const graph: Graph = {
+      id: '.',
+      dependencies: [{ id: 'B@Y' }, { id: 'w1@X' }],
+      workspaces: [w1, { id: 'w2', dependencies: [w1] }],
+    };
+
+    expect(hoist(graph)).toEqual(graph);
   });
 });

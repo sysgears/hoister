@@ -87,18 +87,13 @@ export const toWorkGraph = (rootPkg: Graph): WorkGraph => {
 
   Object.defineProperty(graph, '__decoupled', { value: true });
 
-  const seen = new Set<Graph>();
+  const seen = new Map<Graph, WorkGraph>();
 
-  const visitDependency = (
-    pkg: Graph,
-    parentNode: WorkGraph,
-    parentNodes: Map<PackageId, WorkGraph>,
-    { isWorkspaceDep }: { isWorkspaceDep: boolean }
-  ) => {
-    const isSeen = seen.has(pkg);
+  const visitDependency = (pkg: Graph, parentNode: WorkGraph, { isWorkspaceDep }: { isWorkspaceDep: boolean }) => {
     const aliasedId = getAliasedId(pkg);
-    const newNode = pkg === rootPkg ? graph : parentNodes.get(aliasedId) || { id: aliasedId };
-    seen.add(pkg);
+    const seenNode = seen.get(pkg);
+    const newNode = pkg === rootPkg ? graph : seenNode || { id: aliasedId };
+    seen.set(pkg, newNode);
 
     if (pkg.packageType) {
       newNode.packageType = pkg.packageType;
@@ -123,19 +118,18 @@ export const toWorkGraph = (rootPkg: Graph): WorkGraph => {
       }
     }
 
-    if (!isSeen) {
-      const nextParentNodes = new Map([...parentNodes.entries(), [pkg.id as PackageId, newNode]]);
+    if (!seenNode) {
       for (const workspaceDep of pkg.workspaces || []) {
-        visitDependency(workspaceDep, newNode, nextParentNodes, { isWorkspaceDep: true });
+        visitDependency(workspaceDep, newNode, { isWorkspaceDep: true });
       }
 
       for (const dep of pkg.dependencies || []) {
-        visitDependency(dep, newNode, nextParentNodes, { isWorkspaceDep: false });
+        visitDependency(dep, newNode, { isWorkspaceDep: false });
       }
     }
   };
 
-  visitDependency(rootPkg, graph, new Map(), { isWorkspaceDep: true });
+  visitDependency(rootPkg, graph, { isWorkspaceDep: true });
 
   return graph;
 };
@@ -281,7 +275,7 @@ const getHoistVerdict = (
   }
 
   if (isHoistable === Hoistable.YES) {
-    // Check require promise
+    // Check require contract
     for (newParentIndex = waterMark; newParentIndex < graphPath.length - 1; newParentIndex++) {
       const newParentPkg = graphPath[newParentIndex];
 
@@ -314,7 +308,7 @@ const getHoistVerdict = (
     }
   }
 
-  // Check peer dependency promise
+  // Check peer dependency contract
   if (isHoistable === Hoistable.YES) {
     if (dep.peerNames) {
       for (const peerName of dep.peerNames) {
@@ -500,9 +494,7 @@ const hoistDependencies = (
           dep.id,
           'into',
           rootPkg.id,
-          'result:\n',
-          print(graphPath[0])
-          // require('util').inspect(graphPath[0], false, null)
+          `result:\n${print(graphPath[0])}`
         );
       }
     } else if (verdict.isHoistable === Hoistable.LATER) {
@@ -536,12 +528,24 @@ export const hoist = (pkg: Graph, opts?: HoistOptions): Graph => {
   const graph = toWorkGraph(pkg);
   const options = opts || { trace: false };
   if (options.trace) {
-    console.log('original graph:\n', print(graph));
+    console.log(`original graph:\n${require('util').inspect(graph, false, null)}`);
   }
 
   const usages = getUsages(graph, opts);
   const children = getChildren(graph, opts);
   const priorities = getPriorities(usages, children, opts);
+
+  const workspaceIds = new Set<PackageId>();
+  const visitWorkspace = (workspace: WorkGraph) => {
+    workspaceIds.add(workspace.id);
+    if (workspace.workspaces) {
+      for (const dep of workspace.workspaces.values()) {
+        visitWorkspace(dep);
+      }
+    }
+  };
+  visitWorkspace(graph);
+
   let maxPriorityDepth = 0;
   for (const priorityIds of priorities.values()) {
     maxPriorityDepth = Math.max(maxPriorityDepth, priorityIds.length);
@@ -594,7 +598,7 @@ export const hoist = (pkg: Graph, opts?: HoistOptions): Graph => {
 
       if (node.dependencies) {
         for (const dep of node.dependencies.values()) {
-          if (dep.id !== node.id) {
+          if (dep.id !== node.id && !workspaceIds.has(dep.id)) {
             const depPriorities = getPriorities(usages, getChildren(dep));
             graphPath.push(dep);
             priorityArray.push(depPriorities);
@@ -662,30 +666,59 @@ export const hoist = (pkg: Graph, opts?: HoistOptions): Graph => {
   return fromWorkGraph(graph);
 };
 
+const checkContracts = (graph: WorkGraph): string => {
+  const seen = new Set();
+  const checkDependency = (graphPath: WorkGraph[]): string => {
+    const node = graphPath[graphPath.length - 1];
+    const isSeen = seen.has(node);
+
+    let log = '';
+
+    if (!isSeen) {
+      if (node.workspaces) {
+        for (const dep of node.workspaces.values()) {
+          graphPath.push(dep);
+          log += checkDependency(graphPath);
+          graphPath.pop();
+        }
+      }
+
+      if (node.dependencies) {
+        for (const dep of node.dependencies.values()) {
+          graphPath.push(dep);
+          log += checkDependency(graphPath);
+          graphPath.pop();
+        }
+      }
+    }
+
+    return log;
+  };
+
+  return checkDependency([graph]);
+};
+
 const print = (graph: WorkGraph): string => {
   const printDependency = (
     graphPath: WorkGraph[],
-    { isWorkspace, hasMoreDependencies }: { isWorkspace: boolean; hasMoreDependencies: boolean }
+    { prefix, depPrefix, isWorkspace }: { prefix: string; depPrefix: string; isWorkspace: boolean }
   ): string => {
     const node = graphPath[graphPath.length - 1];
     if (graphPath.indexOf(node) !== graphPath.length - 1) return '';
 
-    let str = '';
-    if (graphPath.length > 1) {
-      str += str.padStart((graphPath.length - 1) * 2, ' ');
-      str += hasMoreDependencies ? `├─` : `└─`;
-    }
+    let str = depPrefix;
     if (isWorkspace) {
       str += 'workspace:';
     } else if (node.packageType === PackageType.PORTAL) {
       str += 'portal:';
     }
+
     str += node.id;
     if (node.wall) {
       str += '|';
     }
     if (node.priority) {
-      str += `queue: ${node.priority}`;
+      str += ` queue: ${node.priority}`;
     }
     str += '\n';
 
@@ -704,9 +737,11 @@ const print = (graph: WorkGraph): string => {
     for (let idx = 0; idx < deps.length; idx++) {
       const dep = deps[idx];
       graphPath.push(dep);
+      const hasMoreDependencies = idx < deps.length - 1;
       str += printDependency(graphPath, {
+        depPrefix: prefix + (hasMoreDependencies ? `├─` : `└─`),
+        prefix: prefix + (hasMoreDependencies ? `│ ` : `  `),
         isWorkspace: idx < workspaceCount,
-        hasMoreDependencies: idx < deps.length - 1,
       });
       graphPath.pop();
     }
@@ -714,5 +749,5 @@ const print = (graph: WorkGraph): string => {
     return str;
   };
 
-  return printDependency([graph], { isWorkspace: true, hasMoreDependencies: false });
+  return printDependency([graph], { prefix: '  ', depPrefix: '', isWorkspace: true });
 };
