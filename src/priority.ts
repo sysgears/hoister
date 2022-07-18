@@ -7,7 +7,7 @@ export type Usages = Map<PackageId, Set<PackageId>>;
 export type Children = Map<PackageId, number>;
 
 type PriorityOptions = {
-  trace: boolean;
+  trace?: boolean;
 };
 
 export const getUsages = (graph: WorkGraph, opts?: PriorityOptions): Usages => {

@@ -1032,6 +1032,6 @@ describe('hoist', () => {
       ],
     };
 
-    expect(hoist(graph)).toEqual(hoistedGraph);
+    expect(hoist(graph, { trace: true })).toEqual(hoistedGraph);
   });
 });

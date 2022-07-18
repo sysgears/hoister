@@ -7,6 +7,10 @@ export enum PackageType {
   PORTAL = 'PORTAL',
 }
 
+export enum CheckType {
+  FINAL = 'FINAL',
+}
+
 export const PackageId = {
   root: '.' as PackageId,
 };
@@ -31,8 +35,6 @@ export type WorkGraph = {
   priority?: number;
   wall?: boolean;
 };
-
-const EMPTY_MAP = new Map();
 
 const decoupleNode = (node: WorkGraph): WorkGraph => {
   if (node['__decoupled']) return node;
@@ -292,9 +294,9 @@ const getHoistVerdict = (
         isHoistable = newParentDep.id === dep.id ? Hoistable.YES : Hoistable.NO;
       }
 
-      if (isHoistable === Hoistable.YES) {
-        for (const [hoistedName, hoistedTo] of dep.hoistedTo || EMPTY_MAP) {
-          const originalId = hoistedTo.dependencies.get(hoistedName);
+      if (isHoistable === Hoistable.YES && dep.hoistedTo) {
+        for (const [hoistedName, hoistedTo] of dep.hoistedTo) {
+          const originalId = hoistedTo.dependencies!.get(hoistedName);
           let availableId: PackageId | undefined = undefined;
           for (let idx = 0; idx < newParentIndex; idx++) {
             availableId = graphPath[idx].dependencies?.get(hoistedName)?.id;
@@ -499,7 +501,8 @@ const hoistDependencies = (
           'into',
           rootPkg.id,
           'result:\n',
-          require('util').inspect(graphPath[0], false, null)
+          print(graphPath[0])
+          // require('util').inspect(graphPath[0], false, null)
         );
       }
     } else if (verdict.isHoistable === Hoistable.LATER) {
@@ -525,12 +528,16 @@ const hoistDependencies = (
 };
 
 type HoistOptions = {
-  trace: boolean;
+  trace?: boolean;
+  check?: CheckType;
 };
 
 export const hoist = (pkg: Graph, opts?: HoistOptions): Graph => {
   const graph = toWorkGraph(pkg);
   const options = opts || { trace: false };
+  if (options.trace) {
+    console.log('original graph:\n', print(graph));
+  }
 
   const usages = getUsages(graph, opts);
   const children = getChildren(graph, opts);
@@ -653,4 +660,59 @@ export const hoist = (pkg: Graph, opts?: HoistOptions): Graph => {
   }
 
   return fromWorkGraph(graph);
+};
+
+const print = (graph: WorkGraph): string => {
+  const printDependency = (
+    graphPath: WorkGraph[],
+    { isWorkspace, hasMoreDependencies }: { isWorkspace: boolean; hasMoreDependencies: boolean }
+  ): string => {
+    const node = graphPath[graphPath.length - 1];
+    if (graphPath.indexOf(node) !== graphPath.length - 1) return '';
+
+    let str = '';
+    if (graphPath.length > 1) {
+      str += str.padStart((graphPath.length - 1) * 2, ' ');
+      str += hasMoreDependencies ? `├─` : `└─`;
+    }
+    if (isWorkspace) {
+      str += 'workspace:';
+    } else if (node.packageType === PackageType.PORTAL) {
+      str += 'portal:';
+    }
+    str += node.id;
+    if (node.wall) {
+      str += '|';
+    }
+    if (node.priority) {
+      str += `queue: ${node.priority}`;
+    }
+    str += '\n';
+
+    let deps: WorkGraph[] = [];
+    let workspaceCount = 0;
+    if (node.workspaces) {
+      const workspaces = Array.from(node.workspaces.values());
+      workspaceCount = workspaces.length;
+      deps = deps.concat(workspaces);
+    }
+
+    if (node.dependencies) {
+      deps = deps.concat(Array.from(node.dependencies.values()));
+    }
+
+    for (let idx = 0; idx < deps.length; idx++) {
+      const dep = deps[idx];
+      graphPath.push(dep);
+      str += printDependency(graphPath, {
+        isWorkspace: idx < workspaceCount,
+        hasMoreDependencies: idx < deps.length - 1,
+      });
+      graphPath.pop();
+    }
+
+    return str;
+  };
+
+  return printDependency([graph], { isWorkspace: true, hasMoreDependencies: false });
 };
