@@ -988,7 +988,7 @@ describe('hoist', () => {
   });
 
   it('should support hoist walls', () => {
-    // . -> D -> A| -> B -> C
+    // . -> D -> A|[B,C] -> B -> C
     // should be hoisted to:
     // . -> A -> B
     //        -> C
@@ -1001,7 +1001,7 @@ describe('hoist', () => {
           dependencies: [
             {
               id: 'A',
-              wall: true,
+              wall: ['B', 'C'],
               dependencies: [
                 {
                   id: 'B',
@@ -1023,7 +1023,7 @@ describe('hoist', () => {
       dependencies: [
         {
           id: 'A',
-          wall: true,
+          wall: ['B', 'C'],
           dependencies: [{ id: 'B' }, { id: 'C' }],
         },
         {

@@ -22,7 +22,7 @@ export type Graph = {
   workspaces?: Graph[];
   peerNames?: string[];
   packageType?: PackageType;
-  wall?: boolean;
+  wall?: string[];
 };
 
 export type WorkGraph = {
@@ -33,7 +33,7 @@ export type WorkGraph = {
   peerNames?: Set<PackageName>;
   packageType?: PackageType;
   priority?: number;
-  wall?: boolean;
+  wall?: Set<PackageName>;
 };
 
 const decoupleNode = (node: WorkGraph): WorkGraph => {
@@ -104,7 +104,7 @@ export const toWorkGraph = (rootPkg: Graph): WorkGraph => {
     }
 
     if (pkg.wall) {
-      newNode.wall = pkg.wall;
+      newNode.wall = new Set(pkg.wall as PackageName[]);
     }
 
     if (pkg !== rootPkg) {
@@ -163,7 +163,7 @@ const fromWorkGraph = (graph: WorkGraph): Graph => {
     }
 
     if (node.wall) {
-      newPkg.wall = node.wall;
+      newPkg.wall = Array.from(node.wall);
     }
 
     if (graphPath.length > 1) {
@@ -253,7 +253,7 @@ const getHoistVerdict = (
   for (waterMark = graphPath.length - 1; waterMark > 0; waterMark--) {
     let newParentIdx = waterMark;
     const newParentPkg = graphPath[waterMark];
-    if (newParentPkg.wall) break;
+    if (newParentPkg.wall && (newParentPkg.wall.size === 0 || newParentPkg.wall.has(depName))) break;
     const hoistedParent = newParentPkg?.hoistedTo?.get(depName);
     if (hoistedParent) {
       newParentIdx = graphPath.indexOf(hoistedParent);
@@ -716,6 +716,9 @@ const print = (graph: WorkGraph): string => {
     str += node.id;
     if (node.wall) {
       str += '|';
+      if (node.wall.size > 0) {
+        str += Array.from(node.wall);
+      }
     }
     if (node.priority) {
       str += ` queue: ${node.priority}`;
