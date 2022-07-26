@@ -28,12 +28,14 @@ export type Graph = {
 export type WorkGraph = {
   id: PackageId;
   dependencies?: Map<PackageName, WorkGraph>;
-  hoistedTo?: Map<PackageName, WorkGraph>;
+  dependants?: Map<WorkGraph, Set<PackageName>>;
   workspaces?: Map<PackageName, WorkGraph>;
   peerNames?: Set<PackageName>;
   packageType?: PackageType;
   priority?: number;
   wall?: Set<PackageName>;
+  originalParent?: WorkGraph;
+  newParent?: WorkGraph;
 };
 
 const decoupleNode = (node: WorkGraph): WorkGraph => {
@@ -108,7 +110,7 @@ export const toWorkGraph = (rootPkg: Graph): WorkGraph => {
     }
 
     if (pkg !== rootPkg) {
-      const name = getPackageName(pkg.id as PackageId);
+      const name = getPackageName(newNode.id);
       if (isWorkspaceDep) {
         parentNode.workspaces = parentNode.workspaces || new Map();
         parentNode.workspaces.set(name, newNode);
@@ -195,9 +197,11 @@ const fromWorkGraph = (graph: WorkGraph): Graph => {
         );
 
         for (const [, dep] of sortedEntries) {
-          graphPath.push(dep);
-          visitDependency(graphPath, newPkg, { isWorkspaceDep: false });
-          graphPath.pop();
+          if (!dep.newParent || dep.newParent === node) {
+            graphPath.push(dep);
+            visitDependency(graphPath, newPkg, { isWorkspaceDep: false });
+            graphPath.pop();
+          }
         }
       }
     }
@@ -208,7 +212,7 @@ const fromWorkGraph = (graph: WorkGraph): Graph => {
   return rootPkg;
 };
 
-type QueueElement = { graphPath: PackageId[]; priorityArray: HoistPriorities[]; depName: PackageName };
+type QueueElement = { graphPath: WorkGraph[]; priorityArray: HoistPriorities[]; depName: PackageName };
 type HoistQueue = Array<QueueElement[]>;
 
 enum Hoistable {
@@ -254,7 +258,7 @@ const getHoistVerdict = (
     let newParentIdx = waterMark;
     const newParentPkg = graphPath[waterMark];
     if (newParentPkg.wall && (newParentPkg.wall.size === 0 || newParentPkg.wall.has(depName))) break;
-    const hoistedParent = newParentPkg?.hoistedTo?.get(depName);
+    const hoistedParent = newParentPkg?.dependencies?.get(depName)?.newParent;
     if (hoistedParent) {
       newParentIdx = graphPath.indexOf(hoistedParent);
     }
@@ -277,9 +281,11 @@ const getHoistVerdict = (
   if (isHoistable === Hoistable.YES) {
     // Check require contract
     for (newParentIndex = waterMark; newParentIndex < graphPath.length - 1; newParentIndex++) {
+      isHoistable = Hoistable.YES;
+
       const newParentPkg = graphPath[newParentIndex];
 
-      const newParentDep = newParentPkg.dependencies?.get(depName) || newParentPkg?.hoistedTo?.get(depName);
+      const newParentDep = newParentPkg.dependencies?.get(depName);
       priorityDepth = priorityArray[newParentIndex].get(depName)!.indexOf(dep.id);
       const isDepTurn = priorityDepth <= currentPriorityDepth;
       if (!newParentDep) {
@@ -288,17 +294,16 @@ const getHoistVerdict = (
         isHoistable = newParentDep.id === dep.id ? Hoistable.YES : Hoistable.NO;
       }
 
-      if (isHoistable === Hoistable.YES && dep.hoistedTo) {
-        for (const [hoistedName, hoistedTo] of dep.hoistedTo) {
-          const originalId = hoistedTo.dependencies!.get(hoistedName);
-          let availableId: PackageId | undefined = undefined;
-          for (let idx = 0; idx < newParentIndex; idx++) {
-            availableId = graphPath[idx].dependencies?.get(hoistedName)?.id;
+      if (isHoistable === Hoistable.YES && dep.dependencies) {
+        for (const [hoistedName, hoistedDep] of dep.dependencies) {
+          if (hoistedDep.newParent) {
+            const originalId = hoistedDep.id;
+            const availableId = newParentPkg.dependencies!.get(hoistedName)?.id;
+
+            isHoistable = availableId === originalId ? Hoistable.YES : Hoistable.NO;
+
+            if (isHoistable === Hoistable.NO) break;
           }
-
-          isHoistable = availableId === originalId ? Hoistable.YES : Hoistable.NO;
-
-          if (isHoistable === Hoistable.NO) break;
         }
       }
 
@@ -316,18 +321,12 @@ const getHoistVerdict = (
         let isHoistedPeerDep;
         let peerParentIdx;
         for (peerParentIdx = graphPath.length - 1; peerParentIdx >= 0; peerParentIdx--) {
-          if (graphPath[peerParentIdx].dependencies?.has(peerName)) {
-            isHoistedPeerDep = false;
-            peerParent = graphPath[peerParentIdx];
-          } else {
-            peerParent = graphPath[peerParentIdx].hoistedTo?.get(peerName);
-            if (peerParent) {
-              peerParentIdx = graphPath.indexOf(peerParent);
-              isHoistedPeerDep = true;
-            }
+          const peerDep = graphPath[peerParentIdx].dependencies?.get(peerName);
+          if (peerDep) {
+            isHoistedPeerDep = !!peerDep.newParent;
+            peerParent = peerDep.newParent || peerDep.originalParent;
+            break;
           }
-
-          if (peerParent) break;
         }
 
         if (peerParent) {
@@ -469,23 +468,22 @@ const hoistDependencies = (
     if (verdict.isHoistable === Hoistable.YES || verdict.isHoistable === Hoistable.DEPENDS) {
       delete dep.priority;
       const rootPkg = graphPath[verdict.newParentIndex];
-      const parentPkg = graphPath[graphPath.length - 1];
-      if (parentPkg.dependencies) {
-        parentPkg.dependencies.delete(depName);
-        if (parentPkg.dependencies.size === 0) {
-          delete parentPkg.dependencies;
+      for (let idx = verdict.newParentIndex; idx < graphPath.length - 1; idx++) {
+        const pkg = graphPath[idx];
+        if (!pkg.dependencies!.has(depName)) {
+          pkg.dependencies!.set(depName, dep);
         }
-        if (!parentPkg.hoistedTo) {
-          parentPkg.hoistedTo = new Map();
+        if (!pkg.dependants) {
+          pkg.dependants = new Map();
         }
-        parentPkg.hoistedTo.set(depName, rootPkg);
+        let depList = pkg.dependants.get(parentPkg);
+        if (!depList) {
+          depList = new Set();
+          pkg.dependants.set(parentPkg, depList);
+        }
+        depList.add(depName);
       }
-      if (!rootPkg.dependencies) {
-        rootPkg.dependencies = new Map();
-      }
-      if (!rootPkg.dependencies.has(depName)) {
-        rootPkg.dependencies.set(depName, dep);
-      }
+      dep.newParent = rootPkg;
 
       if (options.trace) {
         console.log(
@@ -511,10 +509,12 @@ const hoistDependencies = (
       dep.priority = verdict.priorityDepth;
 
       hoistQueue![verdict.priorityDepth].push({
-        graphPath: graphPath.map((x) => x.id),
+        graphPath: graphPath.slice(0),
         priorityArray: priorityArray.slice(0),
         depName,
       });
+    } else {
+      delete dep.priority;
     }
   }
 };
@@ -528,7 +528,7 @@ export const hoist = (pkg: Graph, opts?: HoistOptions): Graph => {
   const graph = toWorkGraph(pkg);
   const options = opts || { trace: false };
   if (options.trace) {
-    console.log(`original graph:\n${require('util').inspect(graph, false, null)}`);
+    console.log(`original graph:\n${print(graph)}\n${require('util').inspect(graph, false, null)}`);
   }
 
   const usages = getUsages(graph, opts);
@@ -562,6 +562,7 @@ export const hoist = (pkg: Graph, opts?: HoistOptions): Graph => {
     if (node.dependencies) {
       for (const [depName, dep] of node.dependencies) {
         const newDep = decoupleNode(dep);
+        newDep.originalParent = node;
         node.dependencies!.set(depName, newDep);
       }
     }
@@ -569,19 +570,22 @@ export const hoist = (pkg: Graph, opts?: HoistOptions): Graph => {
     if (node.workspaces) {
       for (const [workspaceName, workspaceDep] of node.workspaces) {
         const newDep = decoupleNode(workspaceDep);
+        newDep.originalParent = node;
         node.workspaces!.set(workspaceName, newDep);
       }
     }
 
     if (graphPath.length > 1 && node.dependencies) {
-      hoistDependencies(
-        graphPath,
-        priorityArray,
-        priorityDepth,
-        new Set(node.dependencies.keys()),
-        options,
-        hoistQueue
-      );
+      const dependencies = new Set<PackageName>();
+      for (const [depName, dep] of node.dependencies) {
+        if (!dep.newParent || dep.newParent === node) {
+          dependencies.add(depName);
+        }
+      }
+
+      if (dependencies.size > 0) {
+        hoistDependencies(graphPath, priorityArray, priorityDepth, dependencies, options, hoistQueue);
+      }
     }
 
     if (graphPath.indexOf(node) === graphPath.length - 1) {
@@ -598,7 +602,7 @@ export const hoist = (pkg: Graph, opts?: HoistOptions): Graph => {
 
       if (node.dependencies) {
         for (const dep of node.dependencies.values()) {
-          if (dep.id !== node.id && !workspaceIds.has(dep.id)) {
+          if (dep.id !== node.id && !workspaceIds.has(dep.id) && (!dep.newParent || dep.newParent === node)) {
             const depPriorities = getPriorities(usages, getChildren(dep));
             graphPath.push(dep);
             priorityArray.push(depPriorities);
@@ -616,45 +620,16 @@ export const hoist = (pkg: Graph, opts?: HoistOptions): Graph => {
   for (priorityDepth = 1; priorityDepth < maxPriorityDepth; priorityDepth++) {
     while (hoistQueue[priorityDepth].length > 0) {
       const queueElement = hoistQueue[priorityDepth].shift()!;
-      const graphPath: WorkGraph[] = [graph];
-      let parentPkg = graphPath[graphPath.length - 1];
-      for (const id of queueElement.graphPath.slice(1)) {
-        const name = getPackageName(id);
-        const hoistedTo = parentPkg.hoistedTo?.get(name);
-        if (hoistedTo && parentPkg.workspaces?.get(name)?.id !== id) {
-          parentPkg = hoistedTo;
-          let idx;
-          let foundHoistParent = false;
-          for (idx = 0; idx < graphPath.length - 1; idx++) {
-            if (graphPath[idx].id === hoistedTo.id) {
-              foundHoistParent = true;
-              break;
-            }
-          }
-          if (!foundHoistParent) {
-            throw new Error(`Assertion: Unable to find hoist parent ${hoistedTo.id} for ${id}`);
-          }
-          graphPath.splice(idx + 1);
-        }
-        const parentDep = parentPkg.dependencies?.get(name);
-        const parentWorkspaceDep = parentPkg.workspaces?.get(name);
-        if (parentDep?.id === id) {
-          graphPath.push(parentDep);
-        } else if (parentWorkspaceDep?.id === id) {
-          graphPath.push(parentWorkspaceDep);
-        } else {
-          throw new Error(
-            `Assertion: Unable to find child node ${id} in ${parentPkg.id}` +
-              (hoistedTo ? `which were previously hoisted from ${graphPath[graphPath.length - 1].id}` : ``)
-          );
-        }
-        parentPkg = graphPath[graphPath.length - 1];
-      }
+      const graphPath: WorkGraph[] = [];
       const priorityArray: HoistPriorities[] = [];
-      for (const node of graphPath) {
-        const idx = queueElement.graphPath.indexOf(node.id);
-        priorityArray.push(queueElement.priorityArray[idx]);
-      }
+      let node: WorkGraph | undefined = queueElement.graphPath[queueElement.graphPath.length - 1];
+      do {
+        graphPath.unshift(node);
+        const idx = queueElement.graphPath.indexOf(node);
+        priorityArray.unshift(queueElement.priorityArray[idx]);
+        node = node.newParent || node.originalParent;
+      } while (node);
+
       hoistDependencies(graphPath, priorityArray, priorityDepth, new Set([queueElement.depName]), options, hoistQueue);
     }
   }
@@ -671,8 +646,94 @@ const checkContracts = (graph: WorkGraph): string => {
   const checkDependency = (graphPath: WorkGraph[]): string => {
     const node = graphPath[graphPath.length - 1];
     const isSeen = seen.has(node);
+    seen.add(node);
 
     let log = '';
+
+    // if (node.hoistedTo) {
+    //   for (const [depName, newParent] of node.hoistedTo) {
+    //     const dep = newParent.dependencies?.get(depName);
+    //     const hoistedIdx = graphPath.indexOf(newParent);
+    //     if (!dep) {
+    //       log += `${graphPath
+    //         .map((x) => x.id)
+    //         .join('➣')} unable to find dependency ${depName}, previously hoisted to: ${newParent.id}\n`;
+    //     } else if (hoistedIdx < 0) {
+    //       log += `${graphPath.map((x) => x.id).join('➣')} unable to find new parent ${
+    //         newParent.id
+    //       } of previously hoisted dependency ${depName}\n`;
+    //     } else {
+    //       let foundDep = false;
+    //       for (let idx = graphPath.length - 1; idx >= 0; idx--) {
+    //         const parentDep = graphPath[idx].dependencies?.get(depName);
+    //         if (parentDep && parentDep.id !== newParent.id) {
+    //           log += `${graphPath
+    //             .map((x) => x.id)
+    //             .join('➣')} - broken require contract for ${depName} hoisted to: ${graphPath
+    //             .slice(0, hoistedIdx)
+    //             .map((x) => x.id)
+    //             .join('➣')}`;
+    //           log += `: expected ${newParent.id}, but found: ${parentDep.id} at ${graphPath
+    //             .slice(0, idx)
+    //             .map((x) => x.id)
+    //             .join('➣')}`;
+    //           if (parentDep.parent !== graphPath[idx]) {
+    //             log += `, which is an original dependency`;
+    //           } else {
+    //             const originalGraph: WorkGraph[] = [];
+    //             let parent;
+    //             do {
+    //               parent = parentDep.parent;
+    //               if (parent) {
+    //                 originalGraph.unshift(parent);
+    //               }
+    //             } while (parent);
+    //             log += `, which was previously hoisted from ${originalGraph.map((x) => x.id).join('➣')}`;
+    //           }
+    //           log += `\n`;
+    //         }
+
+    //         if (parentDep) {
+    //           foundDep = true;
+    //           break;
+    //         }
+    //       }
+    //       if (!foundDep) {
+    //         log += `${graphPath
+    //           .map((x) => x.id)
+    //           .join('➣')} - broken require contract for ${depName} hoisted to: ${graphPath
+    //           .slice(0, hoistedIdx)
+    //           .map((x) => x.id)
+    //           .join('➣')}`;
+    //         log += `: expected ${newParent.id}, but not found dependency in any of the parents`;
+    //       }
+    //     }
+    //   }
+    // }
+
+    // if (node.peerNames) {
+    //   const originalGraphPath: WorkGraph[] = [];
+    //   let parent;
+    //   do {
+    //     parent = node.parent;
+    //     if (parent) {
+    //       originalGraphPath.unshift(parent);
+    //     }
+    //   } while (parent);
+
+    //   for (const peerName of node.peerNames) {
+    //     let peerDep;
+    //     for (let idx = originalGraphPath.length - 1; idx >= 0; idx--) {
+    //       let peerParent = originalGraphPath[idx].hoistedTo?.get(peerName);
+    //       if (!peerParent && originalGraphPath[idx].dependencies?.has(peerName)) {
+    //         peerParent = originalGraphPath[idx];
+    //       }
+    //       if (peerParent) {
+    //         const peerDep =
+    //       }
+    //     }
+    //   }
+    // }
 
     if (!isSeen) {
       if (node.workspaces) {
@@ -734,7 +795,7 @@ const print = (graph: WorkGraph): string => {
     }
 
     if (node.dependencies) {
-      deps = deps.concat(Array.from(node.dependencies.values()));
+      deps = deps.concat(Array.from(node.dependencies.values()).filter((x) => !x.newParent || x.newParent === node));
     }
 
     for (let idx = 0; idx < deps.length; idx++) {
@@ -752,5 +813,5 @@ const print = (graph: WorkGraph): string => {
     return str;
   };
 
-  return printDependency([graph], { prefix: '  ', depPrefix: '', isWorkspace: true });
+  return printDependency([graph], { prefix: '  ', depPrefix: '', isWorkspace: true }).trim();
 };

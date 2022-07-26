@@ -102,9 +102,11 @@ export const getChildren = (graph: WorkGraph, opts?: PriorityOptions): Children 
 
       if (pkg.dependencies) {
         for (const dep of pkg.dependencies.values()) {
-          graphPath.push({ node: dep, isWorkspace: false });
-          visitDependency(graphPath);
-          graphPath.pop();
+          if (!dep.newParent || dep.newParent === pkg) {
+            graphPath.push({ node: dep, isWorkspace: false });
+            visitDependency(graphPath);
+            graphPath.pop();
+          }
         }
       }
     }
