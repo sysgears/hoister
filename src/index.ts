@@ -28,7 +28,8 @@ export type Graph = {
 export type WorkGraph = {
   id: PackageId;
   dependencies?: Map<PackageName, WorkGraph>;
-  dependants?: Map<WorkGraph, Set<PackageName>>;
+  lookupUsages?: Map<WorkGraph, Set<PackageName>>;
+  lookupDependants?: Map<PackageName, Set<WorkGraph>>;
   workspaces?: Map<PackageName, WorkGraph>;
   peerNames?: Set<PackageName>;
   packageType?: PackageType;
@@ -473,17 +474,58 @@ const hoistDependencies = (
         if (!pkg.dependencies!.has(depName)) {
           pkg.dependencies!.set(depName, dep);
         }
-        if (!pkg.dependants) {
-          pkg.dependants = new Map();
+
+        if (!pkg.lookupUsages) {
+          pkg.lookupUsages = new Map();
         }
-        let depList = pkg.dependants.get(parentPkg);
-        if (!depList) {
-          depList = new Set();
-          pkg.dependants.set(parentPkg, depList);
+
+        let lookupNameList = pkg.lookupUsages.get(parentPkg);
+        if (!lookupNameList) {
+          lookupNameList = new Set();
+          pkg.lookupUsages.set(parentPkg, lookupNameList);
         }
-        depList.add(depName);
+        lookupNameList.add(depName);
+
+        if (!pkg.lookupDependants) {
+          pkg.lookupDependants = new Map();
+        }
+
+        let dependantList = pkg.lookupDependants.get(depName);
+        if (!dependantList) {
+          dependantList = new Set();
+          pkg.lookupDependants.set(depName, dependantList);
+        }
+        dependantList.add(parentPkg);
       }
       dep.newParent = rootPkg;
+
+      for (let idx = verdict.newParentIndex + 1; idx < graphPath.length; idx++) {
+        const pkg = graphPath[idx];
+        if (pkg.lookupUsages) {
+          const depLookupNames = pkg.lookupUsages.get(dep);
+          if (depLookupNames) {
+            for (const name of depLookupNames) {
+              const dependantList = pkg.lookupDependants!.get(name)!;
+              dependantList.delete(dep);
+              if (dependantList.size === 0) {
+                pkg.lookupDependants!.delete(name);
+                const pkgDep = pkg.dependencies!.get(name)!;
+                // Delete "lookup" dependency, because of empty set of dependants
+                if (pkgDep!.newParent && pkgDep!.newParent !== pkg) {
+                  if (options.trace) {
+                    console.log(
+                      `clearing previous lookup dependency by ${dep.id} on ${pkgDep.id} in`,
+                      graphPath.slice(0, idx + 1).map((x) => x.id)
+                    );
+                  }
+                  pkg.dependencies!.delete(name);
+                }
+              }
+            }
+          }
+          pkg.lookupUsages.delete(dep);
+        }
+      }
 
       if (options.trace) {
         console.log(
@@ -632,10 +674,6 @@ export const hoist = (pkg: Graph, opts?: HoistOptions): Graph => {
 
       hoistDependencies(graphPath, priorityArray, priorityDepth, new Set([queueElement.depName]), options, hoistQueue);
     }
-  }
-
-  if (options.trace) {
-    console.log(require('util').inspect(graph, false, null));
   }
 
   return fromWorkGraph(graph);
@@ -797,6 +835,7 @@ const print = (graph: WorkGraph): string => {
     if (node.dependencies) {
       deps = deps.concat(Array.from(node.dependencies.values()).filter((x) => !x.newParent || x.newParent === node));
     }
+    deps.sort((d1, d2) => (d2.id < d1.id ? 1 : -1));
 
     for (let idx = 0; idx < deps.length; idx++) {
       const dep = deps[idx];

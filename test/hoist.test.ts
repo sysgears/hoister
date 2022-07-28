@@ -1044,4 +1044,123 @@ describe('hoist', () => {
 
     expect(hoist(graph)).toEqual(graph);
   });
+
+  it('should release dependency version locking when hoisting over parent', () => {
+    // . -> A -> B@X -> C@X -> D@X -> C@Z
+    //               -> F@Y -> D@Y -> C@Z
+    //   -> E| -> B@Y
+    //         -> C@Y -> D@Y -> C@Z
+    //         -> F@X -> B@Y
+    //                -> C@Y -> D@Y -> C@Z
+    // should be hoisted to (the important thing is that D@X was hoisted into B@X):
+    // . -> A
+    //   -> B@X -> C@X
+    //          -> D@X -> C@Z
+    //   -> C@Z
+    //   -> D@Y
+    //   -> E| -> B@Y
+    //         -> C@Y
+    //         -> F
+    //         -> D@Y -> C@Z
+    //   -> F@Z
+    const graph: Graph = {
+      id: '.',
+      dependencies: [
+        {
+          id: 'A',
+          dependencies: [
+            {
+              id: 'B@X',
+              dependencies: [
+                {
+                  id: 'C@X',
+                  dependencies: [
+                    {
+                      id: 'D@X',
+                      dependencies: [{ id: 'C@Z' }],
+                    },
+                  ],
+                },
+                {
+                  id: 'F@Y',
+                  dependencies: [
+                    {
+                      id: 'D@Y',
+                      dependencies: [{ id: 'C@Z' }],
+                    },
+                  ],
+                },
+              ],
+            },
+          ],
+        },
+        {
+          id: 'E',
+          wall: [],
+          dependencies: [
+            { id: 'B@Y' },
+            {
+              id: 'C@Y',
+              dependencies: [
+                {
+                  id: 'D@Y',
+                  dependencies: [{ id: 'C@Z' }],
+                },
+              ],
+            },
+            {
+              id: 'F',
+              dependencies: [
+                { id: 'B@Y' },
+                {
+                  id: 'C@Y',
+                  dependencies: [
+                    {
+                      id: 'D@Y',
+                      dependencies: [{ id: 'C@Z' }],
+                    },
+                  ],
+                },
+              ],
+            },
+          ],
+        },
+      ],
+    };
+
+    const hoistedGraph: Graph = {
+      id: '.',
+      dependencies: [
+        { id: 'A' },
+        {
+          id: 'B@X',
+          dependencies: [
+            { id: 'C@X' },
+            {
+              id: 'D@X',
+              dependencies: [{ id: 'C@Z' }],
+            },
+          ],
+        },
+        { id: 'C@Z' },
+        { id: 'D@Y' },
+        {
+          id: 'E',
+          dependencies: [
+            { id: 'B@Y' },
+            { id: 'C@Y' },
+            {
+              id: 'D@Y',
+              dependencies: [{ id: 'C@Z' }],
+            },
+            { id: 'F' },
+          ],
+          wall: [],
+        },
+        { id: 'F@Y' },
+      ],
+    };
+
+    expect(hoist(graph)).toEqual(hoistedGraph);
+  });
 });
