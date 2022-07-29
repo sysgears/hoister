@@ -413,7 +413,8 @@ const hoistDependencies = (
   depNames: Set<PackageName>,
   options: HoistOptions,
   hoistQueue: HoistQueue
-) => {
+): boolean => {
+  let wasGraphChanged = false;
   const parentPkg = graphPath[graphPath.length - 1];
 
   const sortedDepNames = depNames.size === 1 ? depNames : getSortedRegularDependencies(parentPkg, depNames);
@@ -551,7 +552,10 @@ const hoistDependencies = (
       const dep = parentPkg.dependencies!.get(depName)!;
       const verdict = verdictMap.get(depName)!;
       if (verdict.isHoistable === Hoistable.DEPENDS) {
-        hoistDependency(dep, depName, verdict.newParentIndex);
+        if (dep.newParent !== graphPath[verdict.newParentIndex]) {
+          hoistDependency(dep, depName, verdict.newParentIndex);
+          wasGraphChanged = true;
+        }
       }
     }
 
@@ -561,7 +565,7 @@ const hoistDependencies = (
         console.log(
           `Contracts violated after hoisting ${Array.from(circularPeerNames)} from ${printGraphPath(
             graphPath
-          )}\n${log}\n${print(graphPath[0])}`
+          )}\n${log}${print(graphPath[0])}`
         );
       }
     }
@@ -571,15 +575,19 @@ const hoistDependencies = (
     const dep = parentPkg.dependencies!.get(depName)!;
     const verdict = verdictMap.get(depName)!;
     if (verdict.isHoistable === Hoistable.YES) {
-      hoistDependency(dep, depName, verdict.newParentIndex);
-      if (options.check === CheckType.THOROUGH) {
-        const log = checkContracts(graphPath[0]);
-        if (log) {
-          throw new Error(
-            `Contracts violated after hoisting ${depName} from ${printGraphPath(graphPath)}\n${log}\n${print(
-              graphPath[0]
-            )}`
-          );
+      if (dep.newParent !== graphPath[verdict.newParentIndex]) {
+        hoistDependency(dep, depName, verdict.newParentIndex);
+        wasGraphChanged = true;
+
+        if (options.check === CheckType.THOROUGH) {
+          const log = checkContracts(graphPath[0]);
+          if (log) {
+            throw new Error(
+              `Contracts violated after hoisting ${depName} from ${printGraphPath(graphPath)}\n${log}${print(
+                graphPath[0]
+              )}`
+            );
+          }
         }
       }
     } else if (verdict.isHoistable === Hoistable.LATER) {
@@ -604,6 +612,8 @@ const hoistDependencies = (
       delete dep.priority;
     }
   }
+
+  return wasGraphChanged;
 };
 
 type HoistOptions = {
@@ -611,23 +621,23 @@ type HoistOptions = {
   check?: CheckType;
 };
 
-export const hoist = (pkg: Graph, opts?: HoistOptions): Graph => {
-  const graph = toWorkGraph(pkg);
-  const options = opts || { trace: false };
+const hoistGraph = (graph: WorkGraph, options: HoistOptions): boolean => {
+  let wasGraphChanged = false;
+
   if (options.trace) {
-    console.log(`original graph:\n${print(graph)}\n${require('util').inspect(graph, false, null)}`);
+    console.log(`original graph:\n${print(graph)}`);
   }
 
   if (options.check) {
     const log = checkContracts(graph);
     if (log) {
-      throw new Error(`Contracts violated on initial graph:\n${log}\n${print(graph)}`);
+      throw new Error(`Contracts violated on initial graph:\n${log}${print(graph)}`);
     }
   }
 
-  const usages = getUsages(graph, opts);
-  const children = getChildren(graph, opts);
-  const priorities = getPriorities(usages, children, opts);
+  const usages = getUsages(graph, options);
+  const children = getChildren(graph, options);
+  const priorities = getPriorities(usages, children, options);
 
   const workspaceIds = new Set<PackageId>();
   const visitWorkspace = (workspace: WorkGraph) => {
@@ -678,7 +688,9 @@ export const hoist = (pkg: Graph, opts?: HoistOptions): Graph => {
       }
 
       if (dependencies.size > 0) {
-        hoistDependencies(graphPath, priorityArray, priorityDepth, dependencies, options, hoistQueue);
+        if (hoistDependencies(graphPath, priorityArray, priorityDepth, dependencies, options, hoistQueue)) {
+          wasGraphChanged = true;
+        }
       }
     }
 
@@ -724,14 +736,127 @@ export const hoist = (pkg: Graph, opts?: HoistOptions): Graph => {
         node = node.newParent || node.originalParent;
       } while (node);
 
-      hoistDependencies(graphPath, priorityArray, priorityDepth, new Set([queueElement.depName]), options, hoistQueue);
+      if (
+        hoistDependencies(graphPath, priorityArray, priorityDepth, new Set([queueElement.depName]), options, hoistQueue)
+      ) {
+        wasGraphChanged = true;
+      }
     }
   }
 
   if (options.check === CheckType.FINAL) {
     const log = checkContracts(graph);
     if (log) {
-      throw new Error(`Contracts violated after hoisting finished:\n${log}\n${print(graph)}`);
+      throw new Error(`Contracts violated after hoisting finished:\n${log}${print(graph)}`);
+    }
+  }
+
+  return wasGraphChanged;
+};
+
+const cloneWorkGraph = (graph: WorkGraph): WorkGraph => {
+  const clonedNodes = new Map<WorkGraph, WorkGraph>();
+
+  const cloneDependency = (node: WorkGraph) => {
+    let clonedNode = clonedNodes.get(node);
+
+    if (!clonedNode) {
+      clonedNode = Object.assign({}, node);
+      if (node['__decoupled']) {
+        Object.defineProperty(clonedNode, '__decoupled', { value: true });
+      }
+
+      delete clonedNode.priority;
+      clonedNodes.set(node, clonedNode);
+
+      if (node.workspaces) {
+        for (const dep of node.workspaces.values()) {
+          cloneDependency(dep);
+        }
+      }
+
+      if (node.dependencies) {
+        for (const dep of node.dependencies.values()) {
+          cloneDependency(dep);
+        }
+      }
+    }
+
+    return clonedNode;
+  };
+
+  const clonedGraph = cloneDependency(graph);
+
+  for (const node of clonedNodes.values()) {
+    if (node.originalParent) {
+      node.originalParent = clonedNodes.get(node.originalParent);
+    }
+
+    if (node.newParent) {
+      node.newParent = clonedNodes.get(node.newParent);
+    }
+
+    if (node.dependencies) {
+      const newDependencies = new Map();
+      for (const [depName, dep] of node.dependencies) {
+        newDependencies.set(depName, clonedNodes.get(dep)!);
+      }
+      node.dependencies = newDependencies;
+    }
+
+    if (node.workspaces) {
+      const newWorkspaces = new Map();
+      for (const [depName, dep] of node.workspaces) {
+        newWorkspaces.set(depName, clonedNodes.get(dep)!);
+      }
+      node.workspaces = newWorkspaces;
+    }
+
+    if (node.lookupDependants) {
+      const newLookupDependants = new Map();
+      for (const [depName, originalUsedBySet] of node.lookupDependants) {
+        const usedBySet = new Set<WorkGraph>();
+        for (const dep of originalUsedBySet) {
+          usedBySet.add(clonedNodes.get(dep)!);
+        }
+        newLookupDependants.set(depName, usedBySet);
+      }
+      node.lookupDependants = newLookupDependants;
+    }
+
+    if (node.lookupUsages) {
+      const newLookupUsages = new Map();
+      for (const [dependant, value] of node.lookupUsages) {
+        newLookupUsages.set(clonedNodes.get(dependant)!, value);
+      }
+      node.lookupUsages = newLookupUsages;
+    }
+  }
+
+  return clonedGraph;
+};
+
+export const hoist = (pkg: Graph, opts?: HoistOptions): Graph => {
+  const graph = toWorkGraph(pkg);
+  const options = opts || { trace: false };
+
+  hoistGraph(graph, options);
+  if (options.check) {
+    if (options.trace) {
+      console.log('second pass');
+    }
+
+    const secondGraph = cloneWorkGraph(graph);
+    let wasGraphChanged = false;
+    try {
+      wasGraphChanged = hoistGraph(secondGraph, options);
+    } catch (e) {
+      throw new Error('While checking for terminal result. ' + (e as any).message);
+    }
+    if (wasGraphChanged) {
+      throw new Error(
+        `Hoister produced non-terminal result\nFirst graph:\n${print(graph)}\n\nSecond graph:\n${print(secondGraph)}`
+      );
     }
   }
 
@@ -781,6 +906,7 @@ const checkContracts = (graph: WorkGraph): string => {
             if (actualDep?.newParent) {
               log += ` previously hoisted from ${printGraphPath(getOriginalGrapPath(actualDep))}`;
             }
+            log += `\n`;
           }
         }
       }
@@ -809,12 +935,13 @@ const checkContracts = (graph: WorkGraph): string => {
           }
 
           if (actualPeerDep !== originalPeerDep) {
-            log += `Expected ${originalPeerDep.id} at ${printGraphPath(graphPath)}, but found: ${
+            log += `Expected peer dependency ${originalPeerDep.id} at ${printGraphPath(graphPath)}, but found: ${
               actualPeerDep?.id || 'none'
             }`;
             if (actualPeerDep?.newParent) {
               log += ` previously hoisted from ${printGraphPath(getOriginalGrapPath(actualPeerDep))}`;
             }
+            log += `\n`;
           }
         }
       }
