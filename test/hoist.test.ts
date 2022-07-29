@@ -1,4 +1,4 @@
-import { Graph, hoist, PackageType } from '../src';
+import { CheckType, Graph, hoist, PackageType } from '../src';
 
 describe('hoist', () => {
   it('should do very basic hoisting', () => {
@@ -16,7 +16,7 @@ describe('hoist', () => {
       dependencies: [{ id: 'A' }, { id: 'B' }],
     };
 
-    expect(hoist(graph)).toEqual(hoistedGraph);
+    expect(hoist(graph, { check: CheckType.THOROUGH })).toEqual(hoistedGraph);
   });
 
   it(`should not hoist conflicting versions of a package`, () => {
@@ -56,7 +56,7 @@ describe('hoist', () => {
       ],
     };
 
-    expect(hoist(graph)).toEqual(hoistedGraph);
+    expect(hoist(graph, { check: CheckType.THOROUGH })).toEqual(hoistedGraph);
   });
 
   it(`should support basic cyclic dependencies`, () => {
@@ -91,7 +91,7 @@ describe('hoist', () => {
       dependencies: [{ id: 'A' }, { id: 'B' }, { id: 'C' }, { id: 'D' }, { id: 'E' }],
     };
 
-    expect(hoist(graph)).toEqual(hoistedGraph);
+    expect(hoist(graph, { check: CheckType.THOROUGH })).toEqual(hoistedGraph);
   });
 
   it('should hoist different instances of the package independently', () => {
@@ -128,7 +128,7 @@ describe('hoist', () => {
       ],
     };
 
-    expect(hoist(graph)).toEqual(hoistedGraph);
+    expect(hoist(graph, { check: CheckType.THOROUGH })).toEqual(hoistedGraph);
   });
 
   it(`should honor package popularity when hoisting`, () => {
@@ -164,7 +164,7 @@ describe('hoist', () => {
       ],
     };
 
-    expect(hoist(graph)).toEqual(hoistedGraph);
+    expect(hoist(graph, { check: CheckType.THOROUGH })).toEqual(hoistedGraph);
   });
 
   it('should handle graph path cuts because of popularity', () => {
@@ -242,7 +242,7 @@ describe('hoist', () => {
       ],
     };
 
-    expect(hoist(graph)).toEqual(hoistedGraph);
+    expect(hoist(graph, { check: CheckType.THOROUGH })).toEqual(hoistedGraph);
   });
 
   it(`should handle conflict with original dependencies after dependencies hoisting`, () => {
@@ -309,7 +309,7 @@ describe('hoist', () => {
       ],
     };
 
-    expect(hoist(graph)).toEqual(hoistedGraph);
+    expect(hoist(graph, { check: CheckType.THOROUGH })).toEqual(hoistedGraph);
   });
 
   it('should not hoisted to a place of previously hoisted dependency with conflicting version', () => {
@@ -357,7 +357,7 @@ describe('hoist', () => {
       ],
     };
 
-    expect(hoist(graph)).toEqual(hoistedGraph);
+    expect(hoist(graph, { check: CheckType.THOROUGH })).toEqual(hoistedGraph);
   });
 
   it('should not break require promise by hoisting higher than the package with conflicting version', () => {
@@ -403,7 +403,7 @@ describe('hoist', () => {
       ],
     };
 
-    expect(hoist(graph)).toEqual(hoistedGraph);
+    expect(hoist(graph, { check: CheckType.THOROUGH })).toEqual(hoistedGraph);
   });
 
   it(`should properly hoist package that has several versions on the tree path`, () => {
@@ -473,7 +473,7 @@ describe('hoist', () => {
       ],
     };
 
-    expect(hoist(graph)).toEqual(hoistedGraph);
+    expect(hoist(graph, { check: CheckType.THOROUGH })).toEqual(hoistedGraph);
   });
 
   it(`should tolerate self-dependencies`, () => {
@@ -521,7 +521,7 @@ describe('hoist', () => {
       ],
     };
 
-    expect(hoist(graph)).toEqual(hoistedGraph);
+    expect(hoist(graph, { check: CheckType.THOROUGH })).toEqual(hoistedGraph);
   });
 
   it(`should support basic peer dependencies`, () => {
@@ -549,7 +549,7 @@ describe('hoist', () => {
       ],
     };
 
-    expect(hoist(graph)).toEqual(graph);
+    expect(hoist(graph, { check: CheckType.THOROUGH })).toEqual(graph);
   });
 
   it(`should hoist dependencies after hoisting peer dependency`, () => {
@@ -589,7 +589,7 @@ describe('hoist', () => {
       ],
     };
 
-    expect(hoist(graph)).toEqual(hoistedGraph);
+    expect(hoist(graph, { check: CheckType.THOROUGH })).toEqual(hoistedGraph);
   });
 
   it('should support basic cyclic peer dependencies', () => {
@@ -625,7 +625,7 @@ describe('hoist', () => {
       ],
     };
 
-    expect(hoist(graph)).toEqual(hoistedGraph);
+    expect(hoist(graph, { check: CheckType.THOROUGH })).toEqual(hoistedGraph);
   });
 
   it('should support partially hoistable cyclic peer dependencies', () => {
@@ -657,7 +657,7 @@ describe('hoist', () => {
       ],
     };
 
-    expect(hoist(graph)).toEqual(graph);
+    expect(hoist(graph, { check: CheckType.THOROUGH })).toEqual(graph);
   });
 
   it(`should respect transitive peer dependencies mixed with direct peer dependencies`, () => {
@@ -721,7 +721,7 @@ describe('hoist', () => {
       ],
     };
 
-    expect(hoist(graph)).toEqual(hoistedGraph);
+    expect(hoist(graph, { check: CheckType.THOROUGH })).toEqual(hoistedGraph);
   });
 
   it(`should support two branch circular graph hoisting`, () => {
@@ -790,7 +790,7 @@ describe('hoist', () => {
       ],
     };
 
-    expect(hoist(graph)).toEqual(hoistedGraph);
+    expect(hoist(graph, { check: CheckType.THOROUGH })).toEqual(hoistedGraph);
   });
 
   it(`should hoist dependencies that peer depend on their parent`, () => {
@@ -831,7 +831,7 @@ describe('hoist', () => {
       ],
     };
 
-    expect(hoist(graph)).toEqual(hoistedGraph);
+    expect(hoist(graph, { check: CheckType.THOROUGH })).toEqual(hoistedGraph);
   });
 
   it('should support portals with contradicting hoist priorities in different parts of the graph', () => {
@@ -928,7 +928,7 @@ describe('hoist', () => {
       ],
     };
 
-    expect(hoist(graph)).toEqual(hoistedGraph);
+    expect(hoist(graph, { check: CheckType.THOROUGH })).toEqual(hoistedGraph);
   });
 
   it('should support aliases hoisting', () => {
@@ -978,7 +978,7 @@ describe('hoist', () => {
       ],
     };
 
-    expect(hoist(graph)).toEqual(hoistedGraph);
+    expect(hoist(graph, { check: CheckType.THOROUGH })).toEqual(hoistedGraph);
   });
 
   it('should support hoist walls', () => {
@@ -1026,7 +1026,7 @@ describe('hoist', () => {
       ],
     };
 
-    expect(hoist(graph)).toEqual(hoistedGraph);
+    expect(hoist(graph, { check: CheckType.THOROUGH })).toEqual(hoistedGraph);
   });
 
   it('should hoist workspaces based on their nesting', () => {
@@ -1042,7 +1042,7 @@ describe('hoist', () => {
       workspaces: [w1, { id: 'w2', dependencies: [w1] }],
     };
 
-    expect(hoist(graph)).toEqual(graph);
+    expect(hoist(graph, { check: CheckType.THOROUGH })).toEqual(graph);
   });
 
   it('should release dependency version locking when hoisting over parent', () => {
@@ -1161,6 +1161,6 @@ describe('hoist', () => {
       ],
     };
 
-    expect(hoist(graph)).toEqual(hoistedGraph);
+    expect(hoist(graph, { check: CheckType.THOROUGH })).toEqual(hoistedGraph);
   });
 });

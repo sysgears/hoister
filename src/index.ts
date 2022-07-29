@@ -8,6 +8,7 @@ export enum PackageType {
 }
 
 export enum CheckType {
+  THOROUGH = 'THOROUGH',
   FINAL = 'FINAL',
 }
 
@@ -463,79 +464,123 @@ const hoistDependencies = (
     );
   }
 
-  for (const depName of sortedDepNames) {
-    const dep = parentPkg.dependencies!.get(depName)!;
-    const verdict = verdictMap.get(depName)!;
-    if (verdict.isHoistable === Hoistable.YES || verdict.isHoistable === Hoistable.DEPENDS) {
-      delete dep.priority;
-      const rootPkg = graphPath[verdict.newParentIndex];
-      for (let idx = verdict.newParentIndex; idx < graphPath.length - 1; idx++) {
-        const pkg = graphPath[idx];
-        if (!pkg.dependencies!.has(depName)) {
-          pkg.dependencies!.set(depName, dep);
-        }
-
-        if (!pkg.lookupUsages) {
-          pkg.lookupUsages = new Map();
-        }
-
-        let lookupNameList = pkg.lookupUsages.get(parentPkg);
-        if (!lookupNameList) {
-          lookupNameList = new Set();
-          pkg.lookupUsages.set(parentPkg, lookupNameList);
-        }
-        lookupNameList.add(depName);
-
-        if (!pkg.lookupDependants) {
-          pkg.lookupDependants = new Map();
-        }
-
-        let dependantList = pkg.lookupDependants.get(depName);
-        if (!dependantList) {
-          dependantList = new Set();
-          pkg.lookupDependants.set(depName, dependantList);
-        }
-        dependantList.add(parentPkg);
+  const hoistDependency = (dep: WorkGraph, depName: PackageName, newParentIndex: number) => {
+    delete dep.priority;
+    const rootPkg = graphPath[newParentIndex];
+    for (let idx = newParentIndex; idx < graphPath.length - 1; idx++) {
+      const pkg = graphPath[idx];
+      if (!pkg.dependencies!.has(depName)) {
+        pkg.dependencies!.set(depName, dep);
       }
-      dep.newParent = rootPkg;
 
-      for (let idx = verdict.newParentIndex + 1; idx < graphPath.length; idx++) {
-        const pkg = graphPath[idx];
-        if (pkg.lookupUsages) {
-          const depLookupNames = pkg.lookupUsages.get(dep);
-          if (depLookupNames) {
-            for (const name of depLookupNames) {
-              const dependantList = pkg.lookupDependants!.get(name)!;
-              dependantList.delete(dep);
-              if (dependantList.size === 0) {
-                pkg.lookupDependants!.delete(name);
-                const pkgDep = pkg.dependencies!.get(name)!;
-                // Delete "lookup" dependency, because of empty set of dependants
-                if (pkgDep!.newParent && pkgDep!.newParent !== pkg) {
-                  if (options.trace) {
-                    console.log(
-                      `clearing previous lookup dependency by ${dep.id} on ${pkgDep.id} in`,
-                      graphPath.slice(0, idx + 1).map((x) => x.id)
-                    );
-                  }
-                  pkg.dependencies!.delete(name);
+      if (!pkg.lookupUsages) {
+        pkg.lookupUsages = new Map();
+      }
+
+      let lookupNameList = pkg.lookupUsages.get(parentPkg);
+      if (!lookupNameList) {
+        lookupNameList = new Set();
+        pkg.lookupUsages.set(parentPkg, lookupNameList);
+      }
+      lookupNameList.add(depName);
+
+      if (!pkg.lookupDependants) {
+        pkg.lookupDependants = new Map();
+      }
+
+      let dependantList = pkg.lookupDependants.get(depName);
+      if (!dependantList) {
+        dependantList = new Set();
+        pkg.lookupDependants.set(depName, dependantList);
+      }
+      dependantList.add(parentPkg);
+    }
+    dep.newParent = rootPkg;
+
+    for (let idx = newParentIndex + 1; idx < graphPath.length; idx++) {
+      const pkg = graphPath[idx];
+      if (pkg.lookupUsages) {
+        const depLookupNames = pkg.lookupUsages.get(dep);
+        if (depLookupNames) {
+          for (const name of depLookupNames) {
+            const dependantList = pkg.lookupDependants!.get(name)!;
+            dependantList.delete(dep);
+            if (dependantList.size === 0) {
+              pkg.lookupDependants!.delete(name);
+              const pkgDep = pkg.dependencies!.get(name)!;
+              // Delete "lookup" dependency, because of empty set of dependants
+              if (pkgDep!.newParent && pkgDep!.newParent !== pkg) {
+                if (options.trace) {
+                  console.log(
+                    `clearing previous lookup dependency by ${dep.id} on ${pkgDep.id} in`,
+                    graphPath.slice(0, idx + 1).map((x) => x.id)
+                  );
                 }
+                pkg.dependencies!.delete(name);
               }
             }
           }
-          pkg.lookupUsages.delete(dep);
         }
+        pkg.lookupUsages.delete(dep);
       }
+    }
 
-      if (options.trace) {
+    if (options.trace) {
+      console.log(
+        graphPath.map((x) => x.id),
+        'hoist',
+        dep.id,
+        'into',
+        rootPkg.id,
+        `result:\n${print(graphPath[0])}`
+      );
+    }
+  };
+
+  const circularPeerNames = new Set<PackageName>();
+
+  for (const depName of sortedDepNames) {
+    const verdict = verdictMap.get(depName)!;
+    if (verdict.isHoistable === Hoistable.DEPENDS) {
+      circularPeerNames.add(depName);
+    }
+  }
+
+  if (circularPeerNames.size > 0) {
+    for (const depName of circularPeerNames) {
+      const dep = parentPkg.dependencies!.get(depName)!;
+      const verdict = verdictMap.get(depName)!;
+      if (verdict.isHoistable === Hoistable.DEPENDS) {
+        hoistDependency(dep, depName, verdict.newParentIndex);
+      }
+    }
+
+    if (options.check === CheckType.THOROUGH) {
+      const log = checkContracts(graphPath[0]);
+      if (log) {
         console.log(
-          graphPath.map((x) => x.id),
-          'hoist',
-          dep.id,
-          'into',
-          rootPkg.id,
-          `result:\n${print(graphPath[0])}`
+          `Contracts violated after hoisting ${Array.from(circularPeerNames)} from ${printGraphPath(
+            graphPath
+          )}\n${log}\n${print(graphPath[0])}`
         );
+      }
+    }
+  }
+
+  for (const depName of sortedDepNames) {
+    const dep = parentPkg.dependencies!.get(depName)!;
+    const verdict = verdictMap.get(depName)!;
+    if (verdict.isHoistable === Hoistable.YES) {
+      hoistDependency(dep, depName, verdict.newParentIndex);
+      if (options.check === CheckType.THOROUGH) {
+        const log = checkContracts(graphPath[0]);
+        if (log) {
+          throw new Error(
+            `Contracts violated after hoisting ${depName} from ${printGraphPath(graphPath)}\n${log}\n${print(
+              graphPath[0]
+            )}`
+          );
+        }
       }
     } else if (verdict.isHoistable === Hoistable.LATER) {
       if (options.trace) {
@@ -571,6 +616,13 @@ export const hoist = (pkg: Graph, opts?: HoistOptions): Graph => {
   const options = opts || { trace: false };
   if (options.trace) {
     console.log(`original graph:\n${print(graph)}\n${require('util').inspect(graph, false, null)}`);
+  }
+
+  if (options.check) {
+    const log = checkContracts(graph);
+    if (log) {
+      throw new Error(`Contracts violated on initial graph:\n${log}\n${print(graph)}`);
+    }
   }
 
   const usages = getUsages(graph, opts);
@@ -676,117 +728,114 @@ export const hoist = (pkg: Graph, opts?: HoistOptions): Graph => {
     }
   }
 
+  if (options.check === CheckType.FINAL) {
+    const log = checkContracts(graph);
+    if (log) {
+      throw new Error(`Contracts violated after hoisting finished:\n${log}\n${print(graph)}`);
+    }
+  }
+
   return fromWorkGraph(graph);
 };
 
+const getOriginalGrapPath = (node: WorkGraph): WorkGraph[] => {
+  const graphPath: WorkGraph[] = [];
+
+  let pkg: WorkGraph | undefined = node;
+  do {
+    if (pkg) {
+      graphPath.unshift(pkg);
+      pkg = pkg.originalParent;
+    }
+  } while (pkg);
+
+  return graphPath;
+};
+
+const printGraphPath = (graphPath: WorkGraph[]): string => graphPath.map((x) => x.id).join('➣');
+
 const checkContracts = (graph: WorkGraph): string => {
   const seen = new Set();
-  const checkDependency = (graphPath: WorkGraph[]): string => {
+  const checkParent = (graphPath: WorkGraph[]): string => {
     const node = graphPath[graphPath.length - 1];
     const isSeen = seen.has(node);
     seen.add(node);
 
     let log = '';
 
-    // if (node.hoistedTo) {
-    //   for (const [depName, newParent] of node.hoistedTo) {
-    //     const dep = newParent.dependencies?.get(depName);
-    //     const hoistedIdx = graphPath.indexOf(newParent);
-    //     if (!dep) {
-    //       log += `${graphPath
-    //         .map((x) => x.id)
-    //         .join('➣')} unable to find dependency ${depName}, previously hoisted to: ${newParent.id}\n`;
-    //     } else if (hoistedIdx < 0) {
-    //       log += `${graphPath.map((x) => x.id).join('➣')} unable to find new parent ${
-    //         newParent.id
-    //       } of previously hoisted dependency ${depName}\n`;
-    //     } else {
-    //       let foundDep = false;
-    //       for (let idx = graphPath.length - 1; idx >= 0; idx--) {
-    //         const parentDep = graphPath[idx].dependencies?.get(depName);
-    //         if (parentDep && parentDep.id !== newParent.id) {
-    //           log += `${graphPath
-    //             .map((x) => x.id)
-    //             .join('➣')} - broken require contract for ${depName} hoisted to: ${graphPath
-    //             .slice(0, hoistedIdx)
-    //             .map((x) => x.id)
-    //             .join('➣')}`;
-    //           log += `: expected ${newParent.id}, but found: ${parentDep.id} at ${graphPath
-    //             .slice(0, idx)
-    //             .map((x) => x.id)
-    //             .join('➣')}`;
-    //           if (parentDep.parent !== graphPath[idx]) {
-    //             log += `, which is an original dependency`;
-    //           } else {
-    //             const originalGraph: WorkGraph[] = [];
-    //             let parent;
-    //             do {
-    //               parent = parentDep.parent;
-    //               if (parent) {
-    //                 originalGraph.unshift(parent);
-    //               }
-    //             } while (parent);
-    //             log += `, which was previously hoisted from ${originalGraph.map((x) => x.id).join('➣')}`;
-    //           }
-    //           log += `\n`;
-    //         }
+    if (node.dependencies) {
+      for (const [depName, dep] of node.dependencies) {
+        const originalDep = dep.originalParent?.dependencies?.get(depName);
+        if (originalDep) {
+          let actualDep;
+          for (let idx = graphPath.length - 1; idx >= 0; idx--) {
+            const nodeDep = graphPath[idx]?.dependencies?.get(depName);
+            if (nodeDep && (nodeDep.newParent || nodeDep.originalParent) == graphPath[idx]) {
+              actualDep = nodeDep;
+              break;
+            }
+          }
 
-    //         if (parentDep) {
-    //           foundDep = true;
-    //           break;
-    //         }
-    //       }
-    //       if (!foundDep) {
-    //         log += `${graphPath
-    //           .map((x) => x.id)
-    //           .join('➣')} - broken require contract for ${depName} hoisted to: ${graphPath
-    //           .slice(0, hoistedIdx)
-    //           .map((x) => x.id)
-    //           .join('➣')}`;
-    //         log += `: expected ${newParent.id}, but not found dependency in any of the parents`;
-    //       }
-    //     }
-    //   }
-    // }
+          if (actualDep?.id !== originalDep.id) {
+            log += `Expected ${originalDep.id} at ${printGraphPath(graphPath)}, but found: ${actualDep?.id || 'none'}`;
+            if (actualDep?.newParent) {
+              log += ` previously hoisted from ${printGraphPath(getOriginalGrapPath(actualDep))}`;
+            }
+          }
+        }
+      }
+    }
 
-    // if (node.peerNames) {
-    //   const originalGraphPath: WorkGraph[] = [];
-    //   let parent;
-    //   do {
-    //     parent = node.parent;
-    //     if (parent) {
-    //       originalGraphPath.unshift(parent);
-    //     }
-    //   } while (parent);
+    if (node.peerNames) {
+      const originalGraphPath = getOriginalGrapPath(node);
+      for (const peerName of node.peerNames) {
+        let originalPeerDep;
+        for (let idx = originalGraphPath.length - 2; idx >= 0; idx--) {
+          const nodeDep = originalGraphPath[idx].dependencies?.get(peerName);
+          if (nodeDep?.originalParent == originalGraphPath[idx]) {
+            originalPeerDep = nodeDep;
+            break;
+          }
+        }
 
-    //   for (const peerName of node.peerNames) {
-    //     let peerDep;
-    //     for (let idx = originalGraphPath.length - 1; idx >= 0; idx--) {
-    //       let peerParent = originalGraphPath[idx].hoistedTo?.get(peerName);
-    //       if (!peerParent && originalGraphPath[idx].dependencies?.has(peerName)) {
-    //         peerParent = originalGraphPath[idx];
-    //       }
-    //       if (peerParent) {
-    //         const peerDep =
-    //       }
-    //     }
-    //   }
-    // }
+        if (originalPeerDep) {
+          let actualPeerDep;
+          for (let idx = graphPath.length - 2; idx >= 0; idx--) {
+            const nodeDep = graphPath[idx].dependencies?.get(peerName);
+            if (nodeDep && (nodeDep.newParent || nodeDep.originalParent) == graphPath[idx]) {
+              actualPeerDep = nodeDep;
+              break;
+            }
+          }
+
+          if (actualPeerDep !== originalPeerDep) {
+            log += `Expected ${originalPeerDep.id} at ${printGraphPath(graphPath)}, but found: ${
+              actualPeerDep?.id || 'none'
+            }`;
+            if (actualPeerDep?.newParent) {
+              log += ` previously hoisted from ${printGraphPath(getOriginalGrapPath(actualPeerDep))}`;
+            }
+          }
+        }
+      }
+    }
 
     if (!isSeen) {
       if (node.workspaces) {
         for (const dep of node.workspaces.values()) {
           graphPath.push(dep);
-          log += checkDependency(graphPath);
+          log += checkParent(graphPath);
           graphPath.pop();
         }
       }
 
       if (node.dependencies) {
         for (const dep of node.dependencies.values()) {
-          graphPath.push(dep);
-          log += checkDependency(graphPath);
-          graphPath.pop();
+          if ((dep.newParent || dep.originalParent) === node) {
+            graphPath.push(dep);
+            log += checkParent(graphPath);
+            graphPath.pop();
+          }
         }
       }
     }
@@ -794,7 +843,7 @@ const checkContracts = (graph: WorkGraph): string => {
     return log;
   };
 
-  return checkDependency([graph]);
+  return checkParent([graph]);
 };
 
 const print = (graph: WorkGraph): string => {
