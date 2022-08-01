@@ -1168,7 +1168,7 @@ describe('hoist', () => {
     // . -> A -> D@X
     //   -> B -> D@X
     //   -> C -> D@X
-    const graph = {
+    const graph: Graph = {
       id: '.',
       dependencies: [
         {
@@ -1186,7 +1186,7 @@ describe('hoist', () => {
       ],
     };
 
-    const hoistedGraph = {
+    const hoistedGraph: Graph = {
       id: '.',
       dependencies: [
         {
@@ -1203,5 +1203,33 @@ describe('hoist', () => {
     };
 
     expect(hoist(graph, { check: CheckType.THOROUGH })).toEqual(hoistedGraph);
+  });
+
+  it('should explain when hoisting is blocked by the parent with conflicting dependency version', () => {
+    // . -> A -> B@X
+    //   -> B@Y
+    const graph: Graph = {
+      id: '.',
+      dependencies: [
+        {
+          id: 'A',
+          dependencies: [{ id: 'B@X' }],
+        },
+        { id: 'B@Y' },
+      ],
+    };
+
+    const hoistedGraph: Graph = {
+      id: '.',
+      dependencies: [
+        {
+          id: 'A',
+          dependencies: [{ id: 'B@X', reason: 'blocked by a conflicting dependency .➣B@Y' }],
+        },
+        { id: 'B@Y' },
+      ],
+    };
+
+    expect(hoist(graph, { check: CheckType.THOROUGH, explain: true })).toEqual(hoistedGraph);
   });
 });

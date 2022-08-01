@@ -1,6 +1,12 @@
 import { getPackageName } from './parse';
 import { getChildren, getPriorities, getUsages, HoistPriorities } from './priority';
 
+type HoistOptions = {
+  trace?: boolean;
+  check?: CheckType;
+  explain?: boolean;
+};
+
 export type PackageId = string & { _packageId: true };
 export type PackageName = string & { _packageName: true };
 export enum PackageType {
@@ -25,6 +31,7 @@ export type Graph = {
   peerNames?: string[];
   packageType?: PackageType;
   wall?: string[];
+  reason?: string;
 };
 
 export type WorkGraph = {
@@ -40,6 +47,7 @@ export type WorkGraph = {
   wall?: Set<PackageName>;
   originalParent?: WorkGraph;
   newParent?: WorkGraph;
+  reason?: string;
 };
 
 const decoupleNode = (node: WorkGraph): WorkGraph => {
@@ -179,6 +187,10 @@ const fromWorkGraph = (graph: WorkGraph): Graph => {
       newPkg.peerNames = Array.from(node.peerNames).sort();
     }
 
+    if (node.reason) {
+      newPkg.reason = node.reason;
+    }
+
     if (node.tags) {
       newPkg.tags = {};
       const keys = Array.from(node.tags.keys()).sort();
@@ -256,6 +268,7 @@ type HoistVerdict =
     }
   | {
       isHoistable: Hoistable.NO;
+      reason: string;
     }
   | {
       isHoistable: Hoistable.DEPENDS;
@@ -275,30 +288,37 @@ const getHoistVerdict = (
   const dependsOn = new Set<PackageName>();
   let priorityDepth;
   let newParentIndex;
+  let reason;
 
-  let waterMark;
-  for (waterMark = graphPath.length - 1; waterMark > 0; waterMark--) {
-    let newParentIdx = waterMark;
-    const newParentPkg = graphPath[waterMark];
-    if (newParentPkg.wall && (newParentPkg.wall.size === 0 || newParentPkg.wall.has(depName))) break;
+  let waterMark = 0;
+  for (let idx = graphPath.length - 1; idx >= 0; idx--) {
+    let newParentIdx = idx;
+    let newParentPkg = graphPath[newParentIdx];
+    if (newParentPkg.wall && (newParentPkg.wall.size === 0 || newParentPkg.wall.has(depName))) {
+      waterMark = idx;
+      break;
+    }
+
     const hoistedParent = newParentPkg?.dependencies?.get(depName)?.newParent;
     if (hoistedParent) {
       newParentIdx = graphPath.indexOf(hoistedParent);
+      newParentPkg = hoistedParent;
     }
 
     const newParentDep = newParentPkg.dependencies?.get(depName);
     if (newParentDep && newParentDep.id !== dep.id) {
       waterMark = newParentIdx + 1;
-      if (newParentDep.priority) {
+      if (waterMark === graphPath.length - 1) {
+        reason = `blocked by a conflicting dependency ${printGraphPath(
+          graphPath.slice(0, graphPath.length - 1).concat([graphPath[graphPath.length - 2].dependencies!.get(depName)!])
+        )}`;
+        isHoistable = Hoistable.NO;
+      } else if (newParentDep.priority) {
         isHoistable = Hoistable.LATER;
         priorityDepth = newParentDep.priority;
       }
       break;
     }
-  }
-
-  if (waterMark === graphPath.length - 1) {
-    isHoistable = Hoistable.NO;
   }
 
   if (isHoistable === Hoistable.YES) {
@@ -383,7 +403,7 @@ const getHoistVerdict = (
   } else if (isHoistable === Hoistable.YES) {
     return { isHoistable, newParentIndex };
   } else {
-    return { isHoistable };
+    return { isHoistable, reason };
   }
 };
 
@@ -645,17 +665,17 @@ const hoistDependencies = (
         priorityArray: priorityArray.slice(0),
         depName,
       });
+    } else if (verdict.isHoistable === Hoistable.NO) {
+      if (options.explain) {
+        dep.reason = verdict.reason;
+      }
+      delete dep.priority;
     } else {
       delete dep.priority;
     }
   }
 
   return wasGraphChanged;
-};
-
-type HoistOptions = {
-  trace?: boolean;
-  check?: CheckType;
 };
 
 const hoistGraph = (graph: WorkGraph, options: HoistOptions): boolean => {
