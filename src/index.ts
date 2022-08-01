@@ -18,6 +18,7 @@ export const PackageId = {
 
 export type Graph = {
   id: string;
+  tags?: Record<string, string[]>;
   alias?: string;
   dependencies?: Graph[];
   workspaces?: Graph[];
@@ -28,6 +29,7 @@ export type Graph = {
 
 export type WorkGraph = {
   id: PackageId;
+  tags?: Map<string, Set<string>>;
   dependencies?: Map<PackageName, WorkGraph>;
   lookupUsages?: Map<WorkGraph, Set<PackageName>>;
   lookupDependants?: Map<PackageName, Set<WorkGraph>>;
@@ -51,6 +53,10 @@ const decoupleNode = (node: WorkGraph): WorkGraph => {
 
   if (node.peerNames) {
     clone.peerNames = new Set(node.peerNames);
+  }
+
+  if (node.tags) {
+    clone.tags = new Map(node.tags);
   }
 
   if (node.wall) {
@@ -105,6 +111,13 @@ export const toWorkGraph = (rootPkg: Graph): WorkGraph => {
 
     if (pkg.peerNames) {
       newNode.peerNames = new Set(pkg.peerNames as PackageName[]);
+    }
+
+    if (pkg.tags) {
+      newNode.tags = new Map();
+      for (const [key, tags] of Object.entries(pkg.tags)) {
+        newNode.tags.set(key, new Set(tags));
+      }
     }
 
     if (pkg.wall) {
@@ -163,11 +176,19 @@ const fromWorkGraph = (graph: WorkGraph): Graph => {
     }
 
     if (node.peerNames) {
-      newPkg.peerNames = Array.from(node.peerNames);
+      newPkg.peerNames = Array.from(node.peerNames).sort();
+    }
+
+    if (node.tags) {
+      newPkg.tags = {};
+      const keys = Array.from(node.tags.keys()).sort();
+      for (const key of keys) {
+        newPkg.tags[key] = Array.from(node.tags.get(key)!).sort();
+      }
     }
 
     if (node.wall) {
-      newPkg.wall = Array.from(node.wall);
+      newPkg.wall = Array.from(node.wall).sort();
     }
 
     if (graphPath.length > 1) {
@@ -470,8 +491,24 @@ const hoistDependencies = (
     const rootPkg = graphPath[newParentIndex];
     for (let idx = newParentIndex; idx < graphPath.length - 1; idx++) {
       const pkg = graphPath[idx];
-      if (!pkg.dependencies!.has(depName)) {
+      const rootPkgDep = pkg.dependencies!.get(depName);
+      if (!rootPkgDep) {
         pkg.dependencies!.set(depName, dep);
+      }
+
+      if (rootPkgDep && dep.tags) {
+        rootPkgDep.tags = rootPkgDep.tags || new Map();
+        for (const [key, tags] of dep.tags) {
+          let rootDepTags = rootPkgDep.tags.get(key);
+          if (!rootDepTags) {
+            rootDepTags = new Set<string>();
+            rootPkgDep.tags.set(key, rootDepTags);
+          }
+
+          for (const tag of tags) {
+            rootDepTags.add(tag);
+          }
+        }
       }
 
       if (!pkg.lookupUsages) {
@@ -877,6 +914,20 @@ const getOriginalGrapPath = (node: WorkGraph): WorkGraph[] => {
   return graphPath;
 };
 
+const getLatestGrapPath = (node: WorkGraph): WorkGraph[] => {
+  const graphPath: WorkGraph[] = [];
+
+  let pkg: WorkGraph | undefined = node;
+  do {
+    if (pkg) {
+      graphPath.unshift(pkg);
+      pkg = pkg.newParent || pkg.originalParent;
+    }
+  } while (pkg);
+
+  return graphPath;
+};
+
 const printGraphPath = (graphPath: WorkGraph[]): string => graphPath.map((x) => x.id).join('➣');
 
 const checkContracts = (graph: WorkGraph): string => {
@@ -937,7 +988,7 @@ const checkContracts = (graph: WorkGraph): string => {
           if (actualPeerDep !== originalPeerDep) {
             log += `Expected peer dependency ${originalPeerDep.id} at ${printGraphPath(graphPath)}, but found: ${
               actualPeerDep?.id || 'none'
-            }`;
+            } at ${getLatestGrapPath(actualPeerDep)}`;
             if (actualPeerDep?.newParent) {
               log += ` previously hoisted from ${printGraphPath(getOriginalGrapPath(actualPeerDep))}`;
             }

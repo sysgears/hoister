@@ -1163,4 +1163,45 @@ describe('hoist', () => {
 
     expect(hoist(graph, { check: CheckType.THOROUGH })).toEqual(hoistedGraph);
   });
+
+  it('should merge tags during hoisting', () => {
+    // . -> A -> D@X
+    //   -> B -> D@X
+    //   -> C -> D@X
+    const graph = {
+      id: '.',
+      dependencies: [
+        {
+          id: 'A',
+          dependencies: [{ id: 'D@X', tags: { key1: ['B', 'A'] } }],
+        },
+        {
+          id: 'B',
+          dependencies: [{ id: 'D@X', tags: { key1: ['C'], key2: ['D'] } }],
+        },
+        {
+          id: 'C',
+          dependencies: [{ id: 'D@X', tags: { key2: ['E'] } }],
+        },
+      ],
+    };
+
+    const hoistedGraph = {
+      id: '.',
+      dependencies: [
+        {
+          id: 'A',
+        },
+        {
+          id: 'B',
+        },
+        {
+          id: 'C',
+        },
+        { id: 'D@X', tags: { key1: ['A', 'B', 'C'], key2: ['D', 'E'] } },
+      ],
+    };
+
+    expect(hoist(graph, { check: CheckType.THOROUGH })).toEqual(hoistedGraph);
+  });
 });
