@@ -294,31 +294,25 @@ const getHoistVerdict = (
 
   let waterMark = 0;
   for (let idx = graphPath.length - 1; idx >= 0; idx--) {
-    let newParentIdx = idx;
-    let newParentPkg = graphPath[newParentIdx];
-    if (newParentPkg.wall && (newParentPkg.wall.size === 0 || newParentPkg.wall.has(depName))) {
-      waterMark = idx;
-      reason = `blocked by the hoisting wall at ${newParentPkg.id}`;
-      break;
-    }
-
-    const hoistedParent = newParentPkg?.dependencies?.get(depName)?.newParent;
-    if (hoistedParent) {
-      newParentIdx = graphPath.indexOf(hoistedParent);
-      newParentPkg = hoistedParent;
-    }
+    const newParentPkg = graphPath[idx];
 
     const newParentDep = newParentPkg.dependencies?.get(depName);
     if (newParentDep && newParentDep.id !== dep.id) {
-      waterMark = newParentIdx + 1;
+      waterMark = idx + 1;
       if (newParentDep.priority && waterMark !== graphPath.length - 1) {
         isHoistable = Hoistable.LATER;
         priorityDepth = newParentDep.priority;
       } else {
-        reason = `blocked by a conflicting dependency ${printGraphPath(
-          graphPath.slice(0, newParentIdx + 1).concat([graphPath[newParentIdx].dependencies!.get(depName)!])
+        reason = `blocked by a conflicting dependency ${newParentDep.id} at ${printGraphPath(
+          graphPath.slice(0, idx + 1)
         )}`;
       }
+      break;
+    }
+
+    if (newParentPkg.wall && (newParentPkg.wall.size === 0 || newParentPkg.wall.has(depName))) {
+      waterMark = idx;
+      reason = `blocked by the hoisting wall at ${newParentPkg.id}`;
       break;
     }
   }
@@ -336,11 +330,9 @@ const getHoistVerdict = (
 
       const newParentDep = newParentPkg.dependencies?.get(depName);
       priorityDepth = priorityArray[newParentIndex].get(depName)!.indexOf(dep.id);
-      const isDepTurn = priorityDepth <= currentPriorityDepth;
       if (!newParentDep) {
+        const isDepTurn = priorityDepth <= currentPriorityDepth;
         isHoistable = isDepTurn ? Hoistable.YES : Hoistable.LATER;
-      } else {
-        isHoistable = newParentDep.id === dep.id ? Hoistable.YES : Hoistable.NO;
       }
 
       if (isHoistable === Hoistable.YES && dep.dependencies) {
@@ -351,7 +343,12 @@ const getHoistVerdict = (
 
             isHoistable = availableId === originalId ? Hoistable.YES : Hoistable.NO;
 
-            if (isHoistable === Hoistable.NO) break;
+            if (isHoistable === Hoistable.NO) {
+              reason = `hoisting to ${printGraphPath(
+                graphPath.slice(0, newParentIndex + 1)
+              )} will result in usage of ${availableId} instead of ${originalId}`;
+              break;
+            }
           }
         }
       }

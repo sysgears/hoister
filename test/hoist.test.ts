@@ -1224,7 +1224,7 @@ describe('hoist', () => {
       dependencies: [
         {
           id: 'A',
-          dependencies: [{ id: 'B@X', reason: 'blocked by a conflicting dependency .➣B@Y' }],
+          dependencies: [{ id: 'B@X', reason: 'blocked by a conflicting dependency B@Y at .' }],
         },
         { id: 'B@Y' },
       ],
@@ -1262,6 +1262,77 @@ describe('hoist', () => {
             },
           ],
         },
+      ],
+    };
+
+    expect(hoist(graph, { check: CheckType.THOROUGH, explain: true })).toEqual(hoistedGraph);
+  });
+
+  it(`should explain conflict with original dependencies after dependencies hoisting`, () => {
+    // . -> A -> B@X -> C@X -> D@X
+    //        -> D@Y
+    //   -> B@Y
+    //   -> E -> C@Y
+    //        -> D@Y
+    //   -> F -> C@Y
+    // should be hoisted to:
+    // . -> A -> B@X -> C@X
+    //               -> D@X
+    //        -> D@Y
+    //   -> B@Y
+    //   -> C@Y
+    //   -> D@X
+    //   -> E
+    //   -> F
+    const graph: Graph = {
+      id: '.',
+      dependencies: [
+        {
+          id: 'A',
+          dependencies: [
+            {
+              id: 'B@X',
+              dependencies: [
+                {
+                  id: 'C@X',
+                  dependencies: [
+                    {
+                      id: 'D@X',
+                    },
+                  ],
+                },
+              ],
+            },
+            { id: 'D@Y' },
+          ],
+        },
+        { id: 'B@Y' },
+        { id: 'E', dependencies: [{ id: 'C@Y' }, { id: 'D@Y' }] },
+        { id: 'F', dependencies: [{ id: 'C@Y' }] },
+      ],
+    };
+
+    const hoistedGraph: Graph = {
+      id: '.',
+      dependencies: [
+        {
+          id: 'A',
+          dependencies: [
+            {
+              id: 'B@X',
+              dependencies: [
+                { id: 'C@X', reason: 'hoisting to .➣A will result in usage of D@Y instead of D@X' },
+                { id: 'D@X' },
+              ],
+              reason: 'blocked by a conflicting dependency B@Y at .',
+            },
+          ],
+        },
+        { id: 'B@Y' },
+        { id: 'C@Y' },
+        { id: 'D@Y' },
+        { id: 'E' },
+        { id: 'F' },
       ],
     };
 
