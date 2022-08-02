@@ -1232,4 +1232,39 @@ describe('hoist', () => {
 
     expect(hoist(graph, { check: CheckType.THOROUGH, explain: true })).toEqual(hoistedGraph);
   });
+
+  it('should explain when hoisting is blocked by the hoisting wall', () => {
+    // . -> A -> B|C -> C
+    // should be hoisted to:
+    // . -> A
+    //   -> B|C -> C
+    const graph: Graph = {
+      id: '.',
+      dependencies: [
+        {
+          id: 'A',
+          dependencies: [{ id: 'B', wall: ['C'], dependencies: [{ id: 'C' }] }],
+        },
+      ],
+    };
+
+    const hoistedGraph: Graph = {
+      id: '.',
+      dependencies: [
+        { id: 'A' },
+        {
+          id: 'B',
+          wall: ['C'],
+          dependencies: [
+            {
+              id: 'C',
+              reason: 'blocked by the hoisting wall at B',
+            },
+          ],
+        },
+      ],
+    };
+
+    expect(hoist(graph, { check: CheckType.THOROUGH, explain: true })).toEqual(hoistedGraph);
+  });
 });

@@ -265,6 +265,7 @@ type HoistVerdict =
   | {
       isHoistable: Hoistable.YES;
       newParentIndex: number;
+      reason?: string;
     }
   | {
       isHoistable: Hoistable.NO;
@@ -274,6 +275,7 @@ type HoistVerdict =
       isHoistable: Hoistable.DEPENDS;
       dependsOn: Set<PackageName>;
       newParentIndex: number;
+      reason?: string;
     };
 
 const getHoistVerdict = (
@@ -296,6 +298,7 @@ const getHoistVerdict = (
     let newParentPkg = graphPath[newParentIdx];
     if (newParentPkg.wall && (newParentPkg.wall.size === 0 || newParentPkg.wall.has(depName))) {
       waterMark = idx;
+      reason = `blocked by the hoisting wall at ${newParentPkg.id}`;
       break;
     }
 
@@ -308,17 +311,20 @@ const getHoistVerdict = (
     const newParentDep = newParentPkg.dependencies?.get(depName);
     if (newParentDep && newParentDep.id !== dep.id) {
       waterMark = newParentIdx + 1;
-      if (waterMark === graphPath.length - 1) {
-        reason = `blocked by a conflicting dependency ${printGraphPath(
-          graphPath.slice(0, graphPath.length - 1).concat([graphPath[graphPath.length - 2].dependencies!.get(depName)!])
-        )}`;
-        isHoistable = Hoistable.NO;
-      } else if (newParentDep.priority) {
+      if (newParentDep.priority && waterMark !== graphPath.length - 1) {
         isHoistable = Hoistable.LATER;
         priorityDepth = newParentDep.priority;
+      } else {
+        reason = `blocked by a conflicting dependency ${printGraphPath(
+          graphPath.slice(0, newParentIdx + 1).concat([graphPath[newParentIdx].dependencies!.get(depName)!])
+        )}`;
       }
       break;
     }
+  }
+
+  if (waterMark === graphPath.length - 1) {
+    isHoistable = Hoistable.NO;
   }
 
   if (isHoistable === Hoistable.YES) {
@@ -399,9 +405,9 @@ const getHoistVerdict = (
   if (isHoistable === Hoistable.LATER) {
     return { isHoistable, priorityDepth };
   } else if (isHoistable === Hoistable.DEPENDS) {
-    return { isHoistable, dependsOn, newParentIndex };
+    return { isHoistable, dependsOn, newParentIndex, reason };
   } else if (isHoistable === Hoistable.YES) {
-    return { isHoistable, newParentIndex };
+    return { isHoistable, newParentIndex, reason };
   } else {
     return { isHoistable, reason };
   }
@@ -915,6 +921,10 @@ export const hoist = (pkg: Graph, opts?: HoistOptions): Graph => {
         `Hoister produced non-terminal result\nFirst graph:\n${print(graph)}\n\nSecond graph:\n${print(secondGraph)}`
       );
     }
+  }
+
+  if (options.trace) {
+    console.log(`final hoisted graph:\n${print(graph)}`);
   }
 
   return fromWorkGraph(graph);
