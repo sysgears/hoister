@@ -1164,6 +1164,53 @@ describe('hoist', () => {
     expect(hoist(graph, { check: CheckType.THOROUGH })).toEqual(hoistedGraph);
   });
 
+  it('should support implicit peer dependencies', () => {
+    // . -> A -> B -> C --> D
+    //        -> D@X
+    //   -> D@Y
+    // should be hoisted to:
+    // . -> A -> B
+    //        -> C
+    //        -> D@X
+    //   -> D@Y
+    const graph: Graph = {
+      id: '.',
+      dependencies: [
+        {
+          id: 'A',
+          dependencies: [
+            {
+              id: 'B',
+              dependencies: [{ id: 'C', peerNames: ['D'] }],
+            },
+            { id: 'D@X' },
+          ],
+        },
+        { id: 'D@Y' },
+      ],
+    };
+
+    const hoistedGraph: Graph = {
+      id: '.',
+      dependencies: [
+        {
+          id: 'A',
+          dependencies: [
+            { id: 'B' },
+            {
+              id: 'C',
+              peerNames: ['D'],
+            },
+            { id: 'D@X' },
+          ],
+        },
+        { id: 'D@Y' },
+      ],
+    };
+
+    expect(hoist(graph, { check: CheckType.THOROUGH })).toEqual(hoistedGraph);
+  });
+
   it('should merge tags during hoisting', () => {
     // . -> A -> D@X
     //   -> B -> D@X
@@ -1338,4 +1385,45 @@ describe('hoist', () => {
 
     expect(hoist(graph, { check: CheckType.THOROUGH, explain: true })).toEqual(hoistedGraph);
   });
+
+  // it('should explain implicit peer dependency constraints', () => {
+  //   // . -> A -> B -> C --> D
+  //   //        -> D@X
+  //   //   -> D@Y
+  //   const graph: Graph = {
+  //     id: '.',
+  //     dependencies: [
+  //       {
+  //         id: 'A',
+  //         dependencies: [
+  //           {
+  //             id: 'B',
+  //             dependencies: [{ id: 'C', peerNames: ['D'] }],
+  //           },
+  //           { id: 'D@X' },
+  //         ],
+  //       },
+  //       { id: 'D@Y' },
+  //     ],
+  //   };
+
+  //   const hoistedGraph: Graph = {
+  //     id: '.',
+  //     dependencies: [
+  //       {
+  //         id: 'A',
+  //         dependencies: [
+  //           {
+  //             id: 'B',
+  //             dependencies: [{ id: 'C', peerNames: ['D'] }],
+  //           },
+  //           { id: 'D@X' },
+  //         ],
+  //       },
+  //       { id: 'D@Y' },
+  //     ],
+  //   };
+
+  //   expect(hoist(graph, { check: CheckType.THOROUGH, explain: true, trace: true })).toEqual(hoistedGraph);
+  // });
 });

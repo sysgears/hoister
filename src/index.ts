@@ -7,6 +7,8 @@ type HoistOptions = {
   explain?: boolean;
 };
 
+type Route = Array<{ depName: PackageName; isWorkspaceDep: boolean }>;
+
 export type PackageId = string & { _packageId: true };
 export type PackageName = string & { _packageName: true };
 export enum PackageType {
@@ -41,7 +43,7 @@ export type WorkGraph = {
   lookupUsages?: Map<WorkGraph, Set<PackageName>>;
   lookupDependants?: Map<PackageName, Set<WorkGraph>>;
   workspaces?: Map<PackageName, WorkGraph>;
-  peerNames?: Set<PackageName>;
+  peerNames?: Map<PackageName, Route | null>;
   packageType?: PackageType;
   priority?: number;
   wall?: Set<PackageName>;
@@ -60,7 +62,7 @@ const decoupleNode = (node: WorkGraph): WorkGraph => {
   }
 
   if (node.peerNames) {
-    clone.peerNames = new Set(node.peerNames);
+    clone.peerNames = new Map(node.peerNames);
   }
 
   if (node.tags) {
@@ -98,6 +100,68 @@ const fromAliasedId = (aliasedId: PackageId): { alias?: PackageName; id: Package
   return idIndex < 0 ? { id: aliasedId } : { alias, id: aliasedId.substring(idIndex + 2) as PackageId };
 };
 
+const populateImplicitPeers = (graph: WorkGraph) => {
+  const seen = new Set();
+
+  const visitDependency = (graphPath: { node: WorkGraph; isWorkspaceDep: boolean }[]) => {
+    const node = graphPath[graphPath.length - 1].node;
+    const isSeen = seen.has(node);
+    seen.add(node);
+
+    if (node.peerNames && graphPath.length > 1) {
+      const parent = graphPath[graphPath.length - 2];
+      for (const [peerName, route] of node.peerNames) {
+        if (route === null && !parent.node.dependencies?.has(peerName) && !parent.node.peerNames?.has(peerName)) {
+          const route: Route = [
+            {
+              depName: getPackageName(node.id),
+              isWorkspaceDep: graphPath[graphPath.length - 1].isWorkspaceDep,
+            },
+          ];
+          for (let idx = graphPath.length - 2; idx >= 0; idx--) {
+            const parent = graphPath[idx];
+            console.log(route, peerName, parent.node.dependencies);
+            if (parent.node.dependencies?.has(peerName)) {
+              for (let j = idx + 1; j < graphPath.length - 1; j++) {
+                const peerNode = graphPath[j].node;
+                if (!peerNode.peerNames) {
+                  peerNode.peerNames = new Map();
+                }
+                if (!peerNode.peerNames.has(peerName)) {
+                  peerNode.peerNames.set(peerName, route);
+                }
+              }
+              break;
+            } else {
+              route.unshift({ depName: getPackageName(parent.node.id), isWorkspaceDep: parent.isWorkspaceDep });
+            }
+          }
+        }
+      }
+    }
+
+    if (!isSeen) {
+      if (node.workspaces) {
+        for (const dep of node.workspaces.values()) {
+          graphPath.push({ node: dep, isWorkspaceDep: true });
+          visitDependency(graphPath);
+          graphPath.pop();
+        }
+      }
+
+      if (node.dependencies) {
+        for (const dep of node.dependencies.values()) {
+          graphPath.push({ node: dep, isWorkspaceDep: true });
+          visitDependency(graphPath);
+          graphPath.pop();
+        }
+      }
+    }
+  };
+
+  visitDependency([{ node: graph, isWorkspaceDep: true }]);
+};
+
 export const toWorkGraph = (rootPkg: Graph): WorkGraph => {
   const graph: WorkGraph = {
     id: getAliasedId(rootPkg),
@@ -118,7 +182,10 @@ export const toWorkGraph = (rootPkg: Graph): WorkGraph => {
     }
 
     if (pkg.peerNames) {
-      newNode.peerNames = new Set(pkg.peerNames as PackageName[]);
+      newNode.peerNames = new Map();
+      for (const peerName of pkg.peerNames) {
+        newNode.peerNames.set(peerName as PackageName, null);
+      }
     }
 
     if (pkg.tags) {
@@ -184,7 +251,14 @@ const fromWorkGraph = (graph: WorkGraph): Graph => {
     }
 
     if (node.peerNames) {
-      newPkg.peerNames = Array.from(node.peerNames).sort();
+      for (const [peerName, route] of node.peerNames) {
+        if (route === null) {
+          if (!newPkg.peerNames) {
+            newPkg.peerNames = [];
+          }
+          newPkg.peerNames.push(peerName);
+        }
+      }
     }
 
     if (node.reason) {
@@ -275,7 +349,6 @@ type HoistVerdict =
       isHoistable: Hoistable.DEPENDS;
       dependsOn: Set<PackageName>;
       newParentIndex: number;
-      reason?: string;
     };
 
 const getHoistVerdict = (
@@ -362,37 +435,38 @@ const getHoistVerdict = (
   // Check peer dependency contract
   if (isHoistable === Hoistable.YES) {
     if (dep.peerNames) {
-      for (const peerName of dep.peerNames) {
+      for (const peerName of dep.peerNames.keys()) {
         let peerParent;
-        let isHoistedPeerDep;
         let peerParentIdx;
-        for (peerParentIdx = graphPath.length - 1; peerParentIdx >= 0; peerParentIdx--) {
-          const peerDep = graphPath[peerParentIdx].dependencies?.get(peerName);
+        let peerDep;
+        for (let idx = graphPath.length - 1; idx >= 0; idx--) {
+          peerDep = graphPath[idx].dependencies?.get(peerName);
           if (peerDep) {
-            isHoistedPeerDep = !!peerDep.newParent;
             peerParent = peerDep.newParent || peerDep.originalParent;
+            peerParentIdx = graphPath.indexOf(peerParent);
             break;
           }
         }
 
         if (peerParent) {
-          if (isHoistedPeerDep) {
-            newParentIndex = Math.max(newParentIndex, peerParentIdx);
-          } else {
-            const depPriority = priorityArray[newParentIndex].get(depName)!.indexOf(dep.id);
-            if (depPriority <= currentPriorityDepth) {
-              if (peerParentIdx === graphPath.length - 1) {
-                // Might be a cyclic peer dependency, mark that we depend on it
-                isHoistable = Hoistable.DEPENDS;
-                dependsOn.add(peerName);
-              } else {
-                newParentIndex = Math.max(newParentIndex, peerParentIdx);
-              }
+          const depPriority = priorityArray[newParentIndex].get(depName)!.indexOf(dep.id);
+          if (depPriority <= currentPriorityDepth) {
+            if (peerParentIdx === graphPath.length - 1) {
+              // Might be a cyclic peer dependency, mark that we depend on it
+              isHoistable = Hoistable.DEPENDS;
+              dependsOn.add(peerName);
             } else {
-              // Should be hoisted later, wait
-              isHoistable = Hoistable.LATER;
-              priorityDepth = Math.max(priorityDepth, depPriority);
+              if (peerParentIdx > newParentIndex) {
+                newParentIndex = peerParentIdx;
+                reason = `unable to hoist over peer dependency ${printGraphPath(
+                  graphPath.slice(0, newParentIndex + 1).concat([peerDep])
+                )}`;
+              }
             }
+          } else {
+            // Should be hoisted later, wait
+            isHoistable = Hoistable.LATER;
+            priorityDepth = Math.max(priorityDepth, depPriority);
           }
         }
       }
@@ -402,9 +476,13 @@ const getHoistVerdict = (
   if (isHoistable === Hoistable.LATER) {
     return { isHoistable, priorityDepth };
   } else if (isHoistable === Hoistable.DEPENDS) {
-    return { isHoistable, dependsOn, newParentIndex, reason };
+    return { isHoistable, dependsOn, newParentIndex };
   } else if (isHoistable === Hoistable.YES) {
-    return { isHoistable, newParentIndex, reason };
+    const result: HoistVerdict = { isHoistable, newParentIndex };
+    if (reason) {
+      result.reason = reason;
+    }
+    return result;
   } else {
     return { isHoistable, reason };
   }
@@ -426,7 +504,7 @@ const getSortedRegularDependencies = (node: WorkGraph, originalDepNames: Set<Pac
     const dep = node.dependencies!.get(depName)!;
 
     if (dep.peerNames) {
-      for (const peerName of dep.peerNames) {
+      for (const peerName of dep.peerNames.keys()) {
         if (originalDepNames.has(peerName) && !node.peerNames?.has(peerName)) {
           const peerDep = node.dependencies!.get(peerName);
           if (peerDep && !depNames.has(peerName)) {
@@ -479,6 +557,7 @@ const hoistDependencies = (
     }
   }
 
+  let updatedVerdicts = false;
   for (const [nodeName, verdict] of verdictMap) {
     const dependants = peerDependants.get(nodeName);
     if (dependants) {
@@ -493,6 +572,7 @@ const hoistDependencies = (
             newParentIndex: Math.max(originalVerdict.newParentIndex, verdict.newParentIndex),
             dependsOn: originalVerdict.dependsOn,
           });
+          updatedVerdicts = true;
         } else {
           verdictMap.set(dependantName, verdict);
         }
@@ -501,12 +581,12 @@ const hoistDependencies = (
   }
 
   if (options.trace) {
-    console.log(
-      currentPriorityDepth === 0 ? 'visit' : 'revisit',
-      graphPath.map((x) => x.id),
-      originalVerdictMap,
-      verdictMap
-    );
+    const args = [currentPriorityDepth === 0 ? 'visit' : 'revisit', graphPath.map((x) => x.id), originalVerdictMap];
+    if (updatedVerdicts) {
+      args.push(`, updated verdicts:`);
+      args.push(verdictMap);
+    }
+    console.log(...args);
   }
 
   const hoistDependency = (dep: WorkGraph, depName: PackageName, newParentIndex: number) => {
@@ -900,6 +980,7 @@ export const hoist = (pkg: Graph, opts?: HoistOptions): Graph => {
   const graph = toWorkGraph(pkg);
   const options = opts || { trace: false };
 
+  populateImplicitPeers(graph);
   hoistGraph(graph, options);
   if (options.check) {
     if (options.trace) {
@@ -992,7 +1073,7 @@ const checkContracts = (graph: WorkGraph): string => {
 
     if (node.peerNames) {
       const originalGraphPath = getOriginalGrapPath(node);
-      for (const peerName of node.peerNames) {
+      for (const peerName of node.peerNames.keys()) {
         let originalPeerDep;
         for (let idx = originalGraphPath.length - 2; idx >= 0; idx--) {
           const nodeDep = originalGraphPath[idx].dependencies?.get(peerName);

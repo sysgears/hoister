@@ -27,7 +27,7 @@ export const getUsages = (graph: WorkGraph, opts?: PriorityOptions): Usages => {
     }
 
     if (pkg.peerNames) {
-      for (const peerName of pkg.peerNames) {
+      for (const peerName of pkg.peerNames.keys()) {
         let peerDep;
         for (let idx = graphPath.length - 2; idx >= 0; idx--) {
           peerDep = graphPath[idx].dependencies?.get(peerName);
