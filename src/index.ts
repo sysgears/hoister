@@ -1,7 +1,7 @@
 import { getPackageName } from './parse';
-import { getChildren, getPriorities, getUsages, HoistPriorities } from './priority';
+import { getChildren, getPriorities, getUsages, HoistPriorities as HoistingPriorities } from './priority';
 
-type HoistOptions = {
+type HoistingOptions = {
   trace?: boolean;
   check?: CheckType;
   explain?: boolean;
@@ -320,8 +320,8 @@ const fromWorkGraph = (graph: WorkGraph): Graph => {
   return rootPkg;
 };
 
-type QueueElement = { graphPath: WorkGraph[]; priorityArray: HoistPriorities[]; depName: PackageName };
-type HoistQueue = Array<QueueElement[]>;
+type QueueElement = { graphPath: WorkGraph[]; priorityArray: HoistingPriorities[]; depName: PackageName };
+type HoistingQueue = Array<QueueElement[]>;
 
 enum Hoistable {
   LATER = 'LATER',
@@ -330,7 +330,7 @@ enum Hoistable {
   DEPENDS = 'DEPENDS',
 }
 
-type HoistVerdict =
+type HoistingDecision =
   | {
       isHoistable: Hoistable.LATER;
       priorityDepth: number;
@@ -350,12 +350,12 @@ type HoistVerdict =
       newParentIndex: number;
     };
 
-const getHoistVerdict = (
+const getHoistingDecision = (
   graphPath: WorkGraph[],
   depName: PackageName,
-  priorityArray: HoistPriorities[],
+  priorityArray: HoistingPriorities[],
   currentPriorityDepth: number
-): HoistVerdict => {
+): HoistingDecision => {
   const parentPkg = graphPath[graphPath.length - 1];
   const dep = parentPkg.dependencies!.get(depName)!;
   let isHoistable = Hoistable.YES;
@@ -477,7 +477,7 @@ const getHoistVerdict = (
   } else if (isHoistable === Hoistable.DEPENDS) {
     return { isHoistable, dependsOn, newParentIndex };
   } else if (isHoistable === Hoistable.YES) {
-    const result: HoistVerdict = { isHoistable, newParentIndex };
+    const result: HoistingDecision = { isHoistable, newParentIndex };
     if (reason) {
       result.reason = reason;
     }
@@ -529,26 +529,26 @@ const getSortedRegularDependencies = (node: WorkGraph, originalDepNames: Set<Pac
 
 const hoistDependencies = (
   graphPath: WorkGraph[],
-  priorityArray: HoistPriorities[],
+  priorityArray: HoistingPriorities[],
   currentPriorityDepth: number,
   depNames: Set<PackageName>,
-  options: HoistOptions,
-  hoistQueue: HoistQueue
+  options: HoistingOptions,
+  hoistingQueue: HoistingQueue
 ): boolean => {
   let wasGraphChanged = false;
   const parentPkg = graphPath[graphPath.length - 1];
 
   const sortedDepNames = depNames.size === 1 ? depNames : getSortedRegularDependencies(parentPkg, depNames);
   const peerDependants = new Map<PackageName, Set<PackageName>>();
-  const verdictMap = new Map<PackageName, HoistVerdict>();
+  const decisionMap = new Map<PackageName, HoistingDecision>();
   for (const depName of sortedDepNames) {
-    verdictMap.set(depName, getHoistVerdict(graphPath, depName, priorityArray, currentPriorityDepth));
+    decisionMap.set(depName, getHoistingDecision(graphPath, depName, priorityArray, currentPriorityDepth));
   }
-  const originalVerdictMap = new Map(verdictMap);
+  const originalVerdictMap = new Map(decisionMap);
 
-  for (const [dependerName, verdict] of verdictMap) {
-    if (verdict.isHoistable === Hoistable.DEPENDS) {
-      for (const dependeeName of verdict.dependsOn) {
+  for (const [dependerName, decision] of decisionMap) {
+    if (decision.isHoistable === Hoistable.DEPENDS) {
+      for (const dependeeName of decision.dependsOn) {
         const dependants = peerDependants.get(dependeeName) || new Set();
         dependants.add(dependerName);
         peerDependants.set(dependeeName, dependants);
@@ -557,23 +557,23 @@ const hoistDependencies = (
   }
 
   let updatedVerdicts = false;
-  for (const [nodeName, verdict] of verdictMap) {
+  for (const [nodeName, decision] of decisionMap) {
     const dependants = peerDependants.get(nodeName);
     if (dependants) {
       for (const dependantName of dependants) {
-        const originalVerdict = verdictMap.get(dependantName)!;
+        const originalVerdict = decisionMap.get(dependantName)!;
         if (
           originalVerdict.isHoistable === Hoistable.DEPENDS &&
-          (verdict.isHoistable === Hoistable.DEPENDS || verdict.isHoistable === Hoistable.YES)
+          (decision.isHoistable === Hoistable.DEPENDS || decision.isHoistable === Hoistable.YES)
         ) {
-          verdictMap.set(dependantName, {
-            isHoistable: verdict.isHoistable,
-            newParentIndex: Math.max(originalVerdict.newParentIndex, verdict.newParentIndex),
+          decisionMap.set(dependantName, {
+            isHoistable: decision.isHoistable,
+            newParentIndex: Math.max(originalVerdict.newParentIndex, decision.newParentIndex),
             dependsOn: originalVerdict.dependsOn,
           });
           updatedVerdicts = true;
         } else {
-          verdictMap.set(dependantName, verdict);
+          decisionMap.set(dependantName, decision);
         }
       }
     }
@@ -582,8 +582,8 @@ const hoistDependencies = (
   if (options.trace) {
     const args = [currentPriorityDepth === 0 ? 'visit' : 'revisit', graphPath.map((x) => x.id), originalVerdictMap];
     if (updatedVerdicts) {
-      args.push(`, updated verdicts:`);
-      args.push(verdictMap);
+      args.push(`, updated decisions:`);
+      args.push(decisionMap);
     }
     console.log(...args);
   }
@@ -680,8 +680,8 @@ const hoistDependencies = (
   const circularPeerNames = new Set<PackageName>();
 
   for (const depName of sortedDepNames) {
-    const verdict = verdictMap.get(depName)!;
-    if (verdict.isHoistable === Hoistable.DEPENDS) {
+    const decision = decisionMap.get(depName)!;
+    if (decision.isHoistable === Hoistable.DEPENDS) {
       circularPeerNames.add(depName);
     }
   }
@@ -689,10 +689,10 @@ const hoistDependencies = (
   if (circularPeerNames.size > 0) {
     for (const depName of circularPeerNames) {
       const dep = parentPkg.dependencies!.get(depName)!;
-      const verdict = verdictMap.get(depName)!;
-      if (verdict.isHoistable === Hoistable.DEPENDS) {
-        if (dep.newParent !== graphPath[verdict.newParentIndex]) {
-          hoistDependency(dep, depName, verdict.newParentIndex);
+      const decision = decisionMap.get(depName)!;
+      if (decision.isHoistable === Hoistable.DEPENDS) {
+        if (dep.newParent !== graphPath[decision.newParentIndex]) {
+          hoistDependency(dep, depName, decision.newParentIndex);
           wasGraphChanged = true;
         }
       }
@@ -712,10 +712,10 @@ const hoistDependencies = (
 
   for (const depName of sortedDepNames) {
     const dep = parentPkg.dependencies!.get(depName)!;
-    const verdict = verdictMap.get(depName)!;
-    if (verdict.isHoistable === Hoistable.YES) {
-      if (dep.newParent !== graphPath[verdict.newParentIndex]) {
-        hoistDependency(dep, depName, verdict.newParentIndex);
+    const decision = decisionMap.get(depName)!;
+    if (decision.isHoistable === Hoistable.YES) {
+      if (dep.newParent !== graphPath[decision.newParentIndex]) {
+        hoistDependency(dep, depName, decision.newParentIndex);
         wasGraphChanged = true;
 
         if (options.check === CheckType.THOROUGH) {
@@ -729,27 +729,27 @@ const hoistDependencies = (
           }
         }
       }
-    } else if (verdict.isHoistable === Hoistable.LATER) {
+    } else if (decision.isHoistable === Hoistable.LATER) {
       if (options.trace) {
         console.log(
           'queue',
           graphPath.map((x) => x.id).concat([dep.id]),
           'to depth:',
-          verdict.priorityDepth,
+          decision.priorityDepth,
           'cur depth:',
           currentPriorityDepth
         );
       }
-      dep.priority = verdict.priorityDepth;
+      dep.priority = decision.priorityDepth;
 
-      hoistQueue![verdict.priorityDepth].push({
+      hoistingQueue![decision.priorityDepth].push({
         graphPath: graphPath.slice(0),
         priorityArray: priorityArray.slice(0),
         depName,
       });
-    } else if (verdict.isHoistable === Hoistable.NO) {
+    } else if (decision.isHoistable === Hoistable.NO) {
       if (options.explain) {
-        dep.reason = verdict.reason;
+        dep.reason = decision.reason;
       }
       delete dep.priority;
     } else {
@@ -760,7 +760,7 @@ const hoistDependencies = (
   return wasGraphChanged;
 };
 
-const hoistGraph = (graph: WorkGraph, options: HoistOptions): boolean => {
+const hoistGraph = (graph: WorkGraph, options: HoistingOptions): boolean => {
   let wasGraphChanged = false;
 
   if (options.trace) {
@@ -793,13 +793,13 @@ const hoistGraph = (graph: WorkGraph, options: HoistOptions): boolean => {
   for (const priorityIds of priorities.values()) {
     maxPriorityDepth = Math.max(maxPriorityDepth, priorityIds.length);
   }
-  const hoistQueue: HoistQueue = [];
+  const hoistingQueue: HoistingQueue = [];
   for (let idx = 0; idx < maxPriorityDepth; idx++) {
-    hoistQueue.push([]);
+    hoistingQueue.push([]);
   }
   let priorityDepth = 0;
 
-  const visitParent = (graphPath: WorkGraph[], priorityArray: HoistPriorities[]) => {
+  const visitParent = (graphPath: WorkGraph[], priorityArray: HoistingPriorities[]) => {
     const node = graphPath[graphPath.length - 1];
 
     if (node.dependencies) {
@@ -827,7 +827,7 @@ const hoistGraph = (graph: WorkGraph, options: HoistOptions): boolean => {
       }
 
       if (dependencies.size > 0) {
-        if (hoistDependencies(graphPath, priorityArray, priorityDepth, dependencies, options, hoistQueue)) {
+        if (hoistDependencies(graphPath, priorityArray, priorityDepth, dependencies, options, hoistingQueue)) {
           wasGraphChanged = true;
         }
       }
@@ -863,10 +863,10 @@ const hoistGraph = (graph: WorkGraph, options: HoistOptions): boolean => {
   visitParent([graph], [priorities]);
 
   for (priorityDepth = 1; priorityDepth < maxPriorityDepth; priorityDepth++) {
-    while (hoistQueue[priorityDepth].length > 0) {
-      const queueElement = hoistQueue[priorityDepth].shift()!;
+    while (hoistingQueue[priorityDepth].length > 0) {
+      const queueElement = hoistingQueue[priorityDepth].shift()!;
       const graphPath: WorkGraph[] = [];
-      const priorityArray: HoistPriorities[] = [];
+      const priorityArray: HoistingPriorities[] = [];
       let node: WorkGraph | undefined = queueElement.graphPath[queueElement.graphPath.length - 1];
       do {
         graphPath.unshift(node);
@@ -876,7 +876,14 @@ const hoistGraph = (graph: WorkGraph, options: HoistOptions): boolean => {
       } while (node);
 
       if (
-        hoistDependencies(graphPath, priorityArray, priorityDepth, new Set([queueElement.depName]), options, hoistQueue)
+        hoistDependencies(
+          graphPath,
+          priorityArray,
+          priorityDepth,
+          new Set([queueElement.depName]),
+          options,
+          hoistingQueue
+        )
       ) {
         wasGraphChanged = true;
       }
@@ -975,7 +982,7 @@ const cloneWorkGraph = (graph: WorkGraph): WorkGraph => {
   return clonedGraph;
 };
 
-export const hoist = (pkg: Graph, opts?: HoistOptions): Graph => {
+export const hoist = (pkg: Graph, opts?: HoistingOptions): Graph => {
   const graph = toWorkGraph(pkg);
   const options = opts || { trace: false };
 
