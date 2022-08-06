@@ -1164,7 +1164,7 @@ describe('hoist', () => {
     expect(hoist(graph, { check: CheckType.THOROUGH })).toEqual(hoistedGraph);
   });
 
-  it('should support implicit peer dependencies', () => {
+  it('should support deep peer dependencies', () => {
     // . -> A -> B -> C --> D
     //        -> D@X
     //   -> D@Y
@@ -1205,6 +1205,63 @@ describe('hoist', () => {
           ],
         },
         { id: 'D@Y' },
+      ],
+    };
+
+    expect(hoist(graph, { check: CheckType.THOROUGH })).toEqual(hoistedGraph);
+  });
+
+  it('should support repetitive deep peer dependencies', () => {
+    // . -> A -> B -> C --> D
+    //        -> D@X
+    //   -> E -> B -> C --> D
+    //        -> D@Y
+    //   -> D@Z
+    const B: Graph = {
+      id: 'B',
+      dependencies: [{ id: 'C', peerNames: ['D'] }],
+    };
+    const graph: Graph = {
+      id: '.',
+      dependencies: [
+        {
+          id: 'A',
+          dependencies: [B, { id: 'D@X' }],
+        },
+        {
+          id: 'E',
+          dependencies: [B, { id: 'D@Y' }],
+        },
+        { id: 'D@Z' },
+      ],
+    };
+
+    const hoistedGraph: Graph = {
+      id: '.',
+      dependencies: [
+        {
+          id: 'A',
+          dependencies: [
+            { id: 'B' },
+            {
+              id: 'C',
+              peerNames: ['D'],
+            },
+            { id: 'D@X' },
+          ],
+        },
+        { id: 'D@Z' },
+        {
+          id: 'E',
+          dependencies: [
+            { id: 'B' },
+            {
+              id: 'C',
+              peerNames: ['D'],
+            },
+            { id: 'D@Y' },
+          ],
+        },
       ],
     };
 

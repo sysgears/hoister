@@ -120,7 +120,6 @@ const populateImplicitPeers = (graph: WorkGraph) => {
           ];
           for (let idx = graphPath.length - 2; idx >= 0; idx--) {
             const parent = graphPath[idx];
-            console.log(route, peerName, parent.node.dependencies);
             if (parent.node.dependencies?.has(peerName)) {
               for (let j = idx + 1; j < graphPath.length - 1; j++) {
                 const peerNode = graphPath[j].node;
@@ -438,17 +437,17 @@ const getHoistVerdict = (
       for (const peerName of dep.peerNames.keys()) {
         let peerParent;
         let peerParentIdx;
-        let peerDep;
         for (let idx = graphPath.length - 1; idx >= 0; idx--) {
-          peerDep = graphPath[idx].dependencies?.get(peerName);
-          if (peerDep) {
-            peerParent = peerDep.newParent || peerDep.originalParent;
-            peerParentIdx = graphPath.indexOf(peerParent);
+          if (!graphPath[idx].peerNames?.has(peerName)) {
+            peerParentIdx = idx;
+            peerParent = graphPath[idx];
             break;
           }
         }
 
-        if (peerParent) {
+        const peerDep = peerParent.dependencies?.get(peerName);
+
+        if (peerDep) {
           const depPriority = priorityArray[newParentIndex].get(depName)!.indexOf(dep.id);
           if (depPriority <= currentPriorityDepth) {
             if (peerParentIdx === graphPath.length - 1) {
