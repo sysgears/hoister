@@ -1,5 +1,5 @@
 import { getPackageName } from './parse';
-import { getChildren, getPriorities, getUsages, HoistPriorities as HoistingPriorities } from './priority';
+import { getChildren, getPriorities, getUsages, HoistingPriorities } from './priority';
 
 type HoistingOptions = {
   trace?: boolean;

@@ -1,8 +1,7 @@
 import { PackageName, PackageId, PackageType, WorkGraph } from '.';
 import { getPackageName } from './parse';
 
-export type HoistPriorities = Map<PackageName, PackageId[]>;
-export type DetailedHoistPriorities = Map<PackageName, PackageId[]>;
+export type HoistingPriorities = Map<PackageName, PackageId[]>;
 export type Usages = Map<PackageId, Set<PackageId>>;
 export type Children = Map<PackageId, number>;
 
@@ -121,7 +120,7 @@ export const getChildren = (graph: WorkGraph, opts?: PriorityOptions): Children 
   return children;
 };
 
-export const getPriorities = (usages: Usages, children: Children, opts?: PriorityOptions): HoistPriorities => {
+export const getPriorities = (usages: Usages, children: Children, opts?: PriorityOptions): HoistingPriorities => {
   const options = opts || { trace: false };
 
   const priorities = new Map();
@@ -154,7 +153,7 @@ export const getPriorities = (usages: Usages, children: Children, opts?: Priorit
   }
 
   if (options.trace) {
-    console.log('hoist priorities', require('util').inspect(priorities, false, null));
+    console.log('hoisting priorities', require('util').inspect(priorities, false, null));
   }
 
   return priorities;
