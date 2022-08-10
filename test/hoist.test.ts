@@ -1328,7 +1328,7 @@ describe('hoist', () => {
       dependencies: [
         {
           id: 'A',
-          dependencies: [{ id: 'B@X', reason: 'blocked by a conflicting dependency B@Y at .' }],
+          dependencies: [{ id: 'B@X', reason: 'B@X is blocked by a conflicting dependency B@Y at .' }],
         },
         { id: 'B@Y' },
       ],
@@ -1362,7 +1362,7 @@ describe('hoist', () => {
           dependencies: [
             {
               id: 'C',
-              reason: 'blocked by the hoisting wall at B',
+              reason: 'C is blocked by the hoisting wall at B',
             },
           ],
         },
@@ -1425,10 +1425,10 @@ describe('hoist', () => {
             {
               id: 'B@X',
               dependencies: [
-                { id: 'C@X', reason: 'hoisting to .➣A will result in usage of D@Y instead of D@X' },
+                { id: 'C@X', reason: 'hoisting C@X to .➣A will result in usage of D@Y instead of D@X' },
                 { id: 'D@X' },
               ],
-              reason: 'blocked by a conflicting dependency B@Y at .',
+              reason: 'B@X is blocked by a conflicting dependency B@Y at .',
             },
           ],
         },
@@ -1443,44 +1443,48 @@ describe('hoist', () => {
     expect(hoist(graph, { check: CheckType.THOROUGH, explain: true })).toEqual(hoistedGraph);
   });
 
-  // it('should explain implicit peer dependency constraints', () => {
-  //   // . -> A -> B -> C --> D
-  //   //        -> D@X
-  //   //   -> D@Y
-  //   const graph: Graph = {
-  //     id: '.',
-  //     dependencies: [
-  //       {
-  //         id: 'A',
-  //         dependencies: [
-  //           {
-  //             id: 'B',
-  //             dependencies: [{ id: 'C', peerNames: ['D'] }],
-  //           },
-  //           { id: 'D@X' },
-  //         ],
-  //       },
-  //       { id: 'D@Y' },
-  //     ],
-  //   };
+  it('should explain peer dependency constraints', () => {
+    // . -> A -> B -> C --> D
+    //        -> D@X
+    //   -> D@Y
+    const graph: Graph = {
+      id: '.',
+      dependencies: [
+        {
+          id: 'A',
+          dependencies: [
+            {
+              id: 'B',
+              dependencies: [{ id: 'C', peerNames: ['D'] }],
+            },
+            { id: 'D@X' },
+          ],
+        },
+        { id: 'D@Y' },
+      ],
+    };
 
-  //   const hoistedGraph: Graph = {
-  //     id: '.',
-  //     dependencies: [
-  //       {
-  //         id: 'A',
-  //         dependencies: [
-  //           {
-  //             id: 'B',
-  //             dependencies: [{ id: 'C', peerNames: ['D'] }],
-  //           },
-  //           { id: 'D@X' },
-  //         ],
-  //       },
-  //       { id: 'D@Y' },
-  //     ],
-  //   };
+    const hoistedGraph: Graph = {
+      id: '.',
+      dependencies: [
+        {
+          id: 'A',
+          dependencies: [
+            {
+              id: 'B',
+              reason: 'peer dependency was not hoisted, due to D@X is blocked by a conflicting dependency D@Y at .',
+            },
+            { id: 'C', peerNames: ['D'] },
+            {
+              id: 'D@X',
+              reason: 'D@X is blocked by a conflicting dependency D@Y at .',
+            },
+          ],
+        },
+        { id: 'D@Y' },
+      ],
+    };
 
-  //   expect(hoist(graph, { check: CheckType.THOROUGH, explain: true, trace: true })).toEqual(hoistedGraph);
-  // });
+    expect(hoist(graph, { check: CheckType.THOROUGH, explain: true })).toEqual(hoistedGraph);
+  });
 });

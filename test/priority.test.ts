@@ -1,5 +1,5 @@
 import { getChildren, getUsages, getPriorities } from '../src/priority';
-import { Graph, PackageType, toWorkGraph } from '../src';
+import { Graph, PackageType, toWorkGraph } from '../src/hoist';
 
 describe('priority', () => {
   it(`should compute usages for repetetive package occurences`, () => {

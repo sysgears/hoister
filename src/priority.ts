@@ -1,4 +1,4 @@
-import { PackageName, PackageId, PackageType, WorkGraph } from '.';
+import { PackageName, PackageId, PackageType, WorkGraph } from './hoist';
 import { getPackageName } from './parse';
 
 export type HoistingPriorities = Map<PackageName, PackageId[]>;
