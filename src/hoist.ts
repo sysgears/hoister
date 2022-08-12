@@ -53,9 +53,7 @@ export type WorkGraph = {
   reason?: string;
 };
 
-const decoupleNode = (node: WorkGraph): WorkGraph => {
-  if (node['__decoupled']) return node;
-
+const cloneNode = (node: WorkGraph): WorkGraph => {
   const clone: WorkGraph = { id: node.id };
 
   if (node.packageType) {
@@ -86,8 +84,6 @@ const decoupleNode = (node: WorkGraph): WorkGraph => {
       clone.dependencies.set(nodeName, clone);
     }
   }
-
-  Object.defineProperty(clone, '__decoupled', { value: true });
 
   return clone;
 };
@@ -558,17 +554,21 @@ const hoistGraph = (graph: WorkGraph, options: HoistingOptions): boolean => {
 
     if (node.dependencies) {
       for (const [depName, dep] of node.dependencies) {
-        const newDep = decoupleNode(dep);
-        newDep.originalParent = node;
-        node.dependencies!.set(depName, newDep);
+        if (!dep.originalParent) {
+          const newDep = cloneNode(dep);
+          newDep.originalParent = node;
+          node.dependencies!.set(depName, newDep);
+        }
       }
     }
 
     if (node.workspaces) {
       for (const [workspaceName, workspaceDep] of node.workspaces) {
-        const newDep = decoupleNode(workspaceDep);
-        newDep.originalParent = node;
-        node.workspaces!.set(workspaceName, newDep);
+        if (!workspaceDep.originalParent) {
+          const newDep = cloneNode(workspaceDep);
+          newDep.originalParent = node;
+          node.workspaces!.set(workspaceName, newDep);
+        }
       }
     }
 
@@ -591,24 +591,8 @@ const hoistGraph = (graph: WorkGraph, options: HoistingOptions): boolean => {
       if (node.workspaces) {
         for (const depWorkspace of node.workspaces.values()) {
           const depPriorities = getPriorities(usages, getChildren(depWorkspace));
-          graphPath.push(depWorkspace);
-          if (options.trace) {
-            console.log(
-              `priorities at ${printGraphPath(graphPath)}: ${require('util').inspect(depPriorities, false, null)}`
-            );
-          }
-          priorityArray.push(depPriorities);
-          visitParent(graphPath, priorityArray);
-          priorityArray.pop();
-          graphPath.pop();
-        }
-      }
-
-      if (node.dependencies) {
-        for (const dep of node.dependencies.values()) {
-          if (dep.id !== node.id && !workspaceIds.has(dep.id) && (!dep.newParent || dep.newParent === node)) {
-            const depPriorities = getPriorities(usages, getChildren(dep));
-            graphPath.push(dep);
+          if (depPriorities.size > 0) {
+            graphPath.push(depWorkspace);
             if (options.trace) {
               console.log(
                 `priorities at ${printGraphPath(graphPath)}: ${require('util').inspect(depPriorities, false, null)}`
@@ -618,6 +602,26 @@ const hoistGraph = (graph: WorkGraph, options: HoistingOptions): boolean => {
             visitParent(graphPath, priorityArray);
             priorityArray.pop();
             graphPath.pop();
+          }
+        }
+      }
+
+      if (node.dependencies) {
+        for (const dep of node.dependencies.values()) {
+          if (dep.id !== node.id && !workspaceIds.has(dep.id) && (!dep.newParent || dep.newParent === node)) {
+            const depPriorities = getPriorities(usages, getChildren(dep));
+            if (depPriorities.size > 0) {
+              graphPath.push(dep);
+              if (options.trace) {
+                console.log(
+                  `priorities at ${printGraphPath(graphPath)}: ${require('util').inspect(depPriorities, false, null)}`
+                );
+              }
+              priorityArray.push(depPriorities);
+              visitParent(graphPath, priorityArray);
+              priorityArray.pop();
+              graphPath.pop();
+            }
           }
         }
       }

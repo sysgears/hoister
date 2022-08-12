@@ -1,4 +1,4 @@
-import { PackageId, PackageName } from '.';
+import { PackageId, PackageName } from './hoist';
 
 export const getPackageName = (pkgId: PackageId): PackageName => {
   const idx = pkgId.indexOf(`@`, 1);
