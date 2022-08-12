@@ -34,6 +34,7 @@ export type Graph = {
   peerNames?: string[];
   packageType?: PackageType;
   wall?: string[];
+  priority?: number;
   reason?: string;
 };
 
@@ -50,6 +51,7 @@ export type WorkGraph = {
   wall?: Set<PackageName>;
   originalParent?: WorkGraph;
   newParent?: WorkGraph;
+  priority?: number;
   reason?: string;
 };
 
@@ -83,6 +85,10 @@ const cloneNode = (node: WorkGraph): WorkGraph => {
     if (selfNameDep === node) {
       clone.dependencies.set(nodeName, clone);
     }
+  }
+
+  if (node.priority) {
+    clone.priority = node.priority;
   }
 
   return clone;
@@ -195,6 +201,10 @@ export const toWorkGraph = (rootPkg: Graph): WorkGraph => {
       newNode.wall = new Set(pkg.wall as PackageName[]);
     }
 
+    if (pkg.priority) {
+      newNode.priority = pkg.priority;
+    }
+
     if (pkg !== rootPkg) {
       const name = getPackageName(newNode.id);
       if (isWorkspaceDep) {
@@ -271,6 +281,10 @@ const fromWorkGraph = (graph: WorkGraph): Graph => {
 
     if (node.wall) {
       newPkg.wall = Array.from(node.wall).sort();
+    }
+
+    if (node.priority) {
+      newPkg.priority = node.priority;
     }
 
     if (graphPath.length > 1) {

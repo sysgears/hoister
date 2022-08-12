@@ -209,4 +209,56 @@ describe('priority', () => {
       ])
     );
   });
+
+  it(`should take into accout user-defined package hoisting priorities`, () => {
+    // . -> A -> B@X
+    //   -> C -> B@X
+    //   -> D -> B@P (priority: 1)
+    //   -> p1 -> B@Z
+    //   -> w1 -> B@Y
+    // Resulting priorities should be in order: B@Z, B@Y, B@P, B@X
+    const graph: Graph = {
+      id: '.',
+      dependencies: [
+        {
+          id: 'A',
+          dependencies: [{ id: 'B@X' }],
+        },
+        {
+          id: 'C',
+          dependencies: [{ id: 'B@X' }],
+        },
+        {
+          id: 'D',
+          dependencies: [{ id: 'B@P', priority: 1 }],
+        },
+        {
+          id: 'p1',
+          dependencies: [{ id: 'B@Z' }],
+          packageType: PackageType.PORTAL,
+        },
+      ],
+      workspaces: [
+        {
+          id: 'w1',
+          dependencies: [{ id: 'B@Y' }],
+        },
+      ],
+    };
+
+    const workGraph = toWorkGraph(graph);
+    const usages = getUsages(workGraph);
+    const children = getChildren(workGraph);
+
+    expect(getPriorities(usages, children)).toEqual(
+      new Map([
+        ['p1', ['p1']],
+        ['w1', ['w1']],
+        ['A', ['A']],
+        ['C', ['C']],
+        ['D', ['D']],
+        ['B', ['B@Z', 'B@Y', 'B@P', 'B@X']],
+      ])
+    );
+  });
 });

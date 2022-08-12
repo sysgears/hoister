@@ -3,7 +3,7 @@ import { getPackageName } from './parse';
 
 export type HoistingPriorities = Map<PackageName, PackageId[]>;
 export type Usages = Map<PackageId, Set<PackageId>>;
-export type Children = Map<PackageId, number>;
+export type Children = Map<PackageId, { internalPriority: number; userPriority: number }>;
 
 export const getUsages = (graph: WorkGraph): Usages => {
   const packageUsages = new Map();
@@ -63,12 +63,14 @@ export const getUsages = (graph: WorkGraph): Usages => {
 };
 
 export const getChildren = (graph: WorkGraph): Children => {
-  const children = new Map();
+  const children: Children = new Map();
 
   const visitDependency = (graphPath: { node: WorkGraph; isWorkspace: boolean }[]) => {
     const pkg = graphPath[graphPath.length - 1].node;
-    const pkgPriority = children.get(pkg.id);
+    let pkgPriority = children.get(pkg.id);
     const isSeen = typeof pkgPriority !== 'undefined';
+    pkgPriority = pkgPriority || { internalPriority: 0, userPriority: 0 };
+
     if (graphPath.length > 1) {
       const parent = graphPath[graphPath.length - 2];
       let priority = 0;
@@ -77,7 +79,10 @@ export const getChildren = (graph: WorkGraph): Children => {
       } else if (parent.node.packageType === PackageType.PORTAL) {
         priority = 2;
       }
-      children.set(pkg.id, Math.max(pkgPriority || 0, priority));
+      children.set(pkg.id, {
+        internalPriority: Math.max(pkgPriority.internalPriority, priority),
+        userPriority: Math.max(pkgPriority.userPriority, pkg.priority || 0),
+      });
     }
 
     if (!isSeen) {
@@ -113,8 +118,10 @@ export const getPriorities = (usages: Usages, children: Children): HoistingPrior
   pkgIds.sort((id1, id2) => {
     const priority1 = children.get(id1)!;
     const priority2 = children.get(id2)!;
-    if (priority2 !== priority1) {
-      return priority2 - priority1;
+    if (priority2.internalPriority !== priority1.internalPriority) {
+      return priority2.internalPriority - priority1.internalPriority;
+    } else if (priority2.userPriority !== priority1.userPriority) {
+      return priority2.userPriority - priority1.userPriority;
     } else {
       const usage1 = usages.get(id1)!.size;
       const usage2 = usages.get(id2)!.size;
