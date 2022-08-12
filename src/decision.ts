@@ -222,35 +222,43 @@ export const finalizeDependedDecisions = (
   for (const [dependantName, dependees] of dependsOn) {
     const originalDecision = preliminaryDecisionMap.get(dependantName)!;
     if (originalDecision.isHoistable === Hoistable.DEPENDS) {
-      let finalDecision: HoistingDecision | null = null;
+      let isHoistable: Hoistable = originalDecision.isHoistable;
+      let priorityDepth = 0;
+      let newParentIndex: number = originalDecision.newParentIndex;
+      let reason: string | undefined = originalDecision.reason;
       for (const dependeeName of dependees) {
         const dependeeDecision = preliminaryDecisionMap.get(dependeeName);
         if (dependeeDecision) {
           if (dependeeDecision.isHoistable === Hoistable.LATER) {
-            if (finalDecision && finalDecision.isHoistable === Hoistable.LATER) {
-              finalDecision.priorityDepth = Math.max(finalDecision.priorityDepth, dependeeDecision.priorityDepth);
-            } else {
-              finalDecision = { isHoistable: Hoistable.LATER, priorityDepth: dependeeDecision.priorityDepth };
+            isHoistable = Hoistable.LATER;
+            priorityDepth = Math.max(priorityDepth, dependeeDecision.priorityDepth);
+          } else if (isHoistable !== Hoistable.LATER) {
+            if (dependeeDecision.isHoistable === Hoistable.YES) {
+              isHoistable = Hoistable.YES;
             }
-          } else if (
-            (!finalDecision || finalDecision.isHoistable === Hoistable.YES) &&
-            dependeeDecision.isHoistable === Hoistable.YES
-          ) {
-            finalDecision = finalDecision || {
-              isHoistable: Hoistable.YES,
-              newParentIndex: originalDecision.newParentIndex,
-              reason: originalDecision.reason,
-            };
-
-            if (dependeeDecision.newParentIndex > finalDecision.newParentIndex) {
-              finalDecision.newParentIndex = dependeeDecision.newParentIndex;
-              finalDecision.reason = `peer dependency was not hoisted, due to ${dependeeDecision.reason}`;
+            if (dependeeDecision.newParentIndex > newParentIndex) {
+              newParentIndex = dependeeDecision.newParentIndex;
+              reason = `peer dependency was not hoisted, due to ${dependeeDecision.reason}`;
             }
           }
         }
       }
-      if (finalDecision) {
+      if (isHoistable !== Hoistable.DEPENDS || newParentIndex > originalDecision.newParentIndex) {
         wereDecisionsUpdated = true;
+        let finalDecision: HoistingDecision;
+        if (isHoistable === Hoistable.LATER) {
+          finalDecision = { isHoistable, priorityDepth };
+        } else if (isHoistable === Hoistable.YES) {
+          finalDecision = { isHoistable, newParentIndex };
+          if (reason) {
+            finalDecision.reason = reason;
+          }
+        } else {
+          finalDecision = { isHoistable, newParentIndex, dependsOn: originalDecision.dependsOn };
+          if (reason) {
+            finalDecision.reason = reason;
+          }
+        }
         finalDecisions.decisionMap.set(dependantName, finalDecision);
       }
     }

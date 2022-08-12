@@ -375,7 +375,10 @@ const hoistDependencies = (
   let wasGraphChanged = false;
   const parentPkg = graphPath[graphPath.length - 1];
 
-  const sortedDepNames = depNames.size === 1 ? depNames : getSortedRegularDependencies(parentPkg, depNames);
+  const sortedDepNames =
+    depNames.size === 1 || options.check !== CheckType.THOROUGH
+      ? depNames
+      : getSortedRegularDependencies(parentPkg, depNames);
   const preliminaryDecisionMap = new Map<PackageName, HoistingDecision>();
   for (const depName of sortedDepNames) {
     preliminaryDecisionMap.set(depName, getHoistingDecision(graphPath, depName, priorityArray, currentPriorityDepth));
