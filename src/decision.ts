@@ -117,37 +117,39 @@ export const getHoistingDecision = (
   if (isHoistable === Hoistable.YES) {
     if (dep.peerNames) {
       for (const peerName of dep.peerNames.keys()) {
-        let peerParent;
-        let peerParentIdx;
-        for (let idx = graphPath.length - 1; idx >= 0; idx--) {
-          if (!graphPath[idx].peerNames?.has(peerName)) {
-            peerParentIdx = idx;
-            peerParent = graphPath[idx];
-            break;
-          }
-        }
-
-        const peerDep = peerParent.dependencies?.get(peerName);
-
-        if (peerDep) {
-          const depPriority = priorityArray[newParentIndex].get(depName)!.indexOf(dep.id);
-          if (depPriority <= currentPriorityDepth) {
-            if (peerParentIdx === graphPath.length - 1) {
-              // Might be a cyclic peer dependency, mark that we depend on it
-              isHoistable = Hoistable.DEPENDS;
-              dependsOn.add(peerName);
-            } else {
-              if (peerParentIdx > newParentIndex) {
-                newParentIndex = peerParentIdx;
-                reason = `unable to hoist ${dep.id} over peer dependency ${printGraphPath(
-                  graphPath.slice(0, newParentIndex + 1).concat([peerDep])
-                )}`;
-              }
+        if (peerName !== depName) {
+          let peerParent;
+          let peerParentIdx;
+          for (let idx = graphPath.length - 1; idx >= 0; idx--) {
+            if (!graphPath[idx].peerNames?.has(peerName)) {
+              peerParentIdx = idx;
+              peerParent = graphPath[idx];
+              break;
             }
-          } else {
-            // Should be hoisted later, wait
-            isHoistable = Hoistable.LATER;
-            priorityDepth = Math.max(priorityDepth, depPriority);
+          }
+
+          const peerDep = peerParent.dependencies?.get(peerName);
+
+          if (peerDep) {
+            const depPriority = priorityArray[newParentIndex].get(depName)!.indexOf(dep.id);
+            if (depPriority <= currentPriorityDepth) {
+              if (peerParentIdx === graphPath.length - 1) {
+                // Might be a cyclic peer dependency, mark that we depend on it
+                isHoistable = Hoistable.DEPENDS;
+                dependsOn.add(peerName);
+              } else {
+                if (peerParentIdx > newParentIndex) {
+                  newParentIndex = peerParentIdx;
+                  reason = `unable to hoist ${dep.id} over peer dependency ${printGraphPath(
+                    graphPath.slice(0, newParentIndex + 1).concat([peerDep])
+                  )}`;
+                }
+              }
+            } else {
+              // Should be hoisted later, wait
+              isHoistable = Hoistable.LATER;
+              priorityDepth = Math.max(priorityDepth, depPriority);
+            }
           }
         }
       }
@@ -182,7 +184,7 @@ export const finalizeDependedDecisions = (
   }
 
   const finalDecisions: FinalDecisions = {
-    decisionMap: new Map(preliminaryDecisionMap),
+    decisionMap: new Map(),
     circularPackageNames: new Set(),
   };
 
@@ -210,15 +212,26 @@ export const finalizeDependedDecisions = (
 
   for (const [dependantName, decision] of preliminaryDecisionMap) {
     if (decision.isHoistable === Hoistable.DEPENDS) {
-      dependsOn.set(dependantName, getRecursiveDependees(dependantName, new Set()));
+      const dependees = getRecursiveDependees(dependantName, new Set());
+      dependsOn.set(dependantName, dependees);
+
+      const dependeesArray = Array.from(dependees);
+      for (let idx = dependeesArray.length - 1; idx >= 0; idx--) {
+        const dependee = dependeesArray[idx];
+        const dependeeDecision = preliminaryDecisionMap.get(dependee);
+        if (dependeeDecision && !finalDecisions.decisionMap.has(dependee)) {
+          finalDecisions.decisionMap.set(dependee, dependeeDecision);
+        }
+      }
+    } else {
+      finalDecisions.decisionMap.set(dependantName, decision);
     }
   }
 
-  if (options.trace) {
+  if (options.trace && dependsOn.size > 0) {
     console.log('dependsOn:', dependsOn);
   }
 
-  let wereDecisionsUpdated = false;
   for (const [dependantName, dependees] of dependsOn) {
     const originalDecision = preliminaryDecisionMap.get(dependantName)!;
     if (originalDecision.isHoistable === Hoistable.DEPENDS) {
@@ -243,8 +256,8 @@ export const finalizeDependedDecisions = (
           }
         }
       }
+
       if (isHoistable !== Hoistable.DEPENDS || newParentIndex > originalDecision.newParentIndex) {
-        wereDecisionsUpdated = true;
         let finalDecision: HoistingDecision;
         if (isHoistable === Hoistable.LATER) {
           finalDecision = { isHoistable, priorityDepth };
@@ -271,7 +284,7 @@ export const finalizeDependedDecisions = (
     }
   }
 
-  if (options.trace && wereDecisionsUpdated) {
+  if (options.trace && dependsOn.size > 0) {
     console.log('final decisions:', require('util').inspect(finalDecisions, false, null));
   }
 

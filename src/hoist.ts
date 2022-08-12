@@ -324,46 +324,6 @@ const fromWorkGraph = (graph: WorkGraph): Graph => {
 type QueueElement = { graphPath: WorkGraph[]; priorityArray: HoistingPriorities[]; depName: PackageName };
 type HoistingQueue = Array<QueueElement[]>;
 
-/**
- * Gets regular node dependencies only and sorts them in the order so that
- * peer dependencies come before the dependency that rely on them.
- *
- * @param node graph node
- * @returns sorted regular dependencies
- */
-const getSortedRegularDependencies = (node: WorkGraph, originalDepNames: Set<PackageName>): Set<PackageName> => {
-  const depNames: Set<PackageName> = new Set();
-
-  const addDep = (depName: PackageName, seenDeps = new Set()) => {
-    if (seenDeps.has(depName)) return;
-    seenDeps.add(depName);
-    const dep = node.dependencies!.get(depName)!;
-
-    if (dep.peerNames) {
-      for (const peerName of dep.peerNames.keys()) {
-        if (originalDepNames.has(peerName) && !node.peerNames?.has(peerName)) {
-          const peerDep = node.dependencies!.get(peerName);
-          if (peerDep && !depNames.has(peerName)) {
-            addDep(peerName, seenDeps);
-          }
-        }
-      }
-    }
-
-    depNames.add(depName);
-  };
-
-  if (node.dependencies) {
-    for (const depName of originalDepNames) {
-      if (!node.peerNames?.has(depName)) {
-        addDep(depName);
-      }
-    }
-  }
-
-  return depNames;
-};
-
 const hoistDependencies = (
   graphPath: WorkGraph[],
   priorityArray: HoistingPriorities[],
@@ -375,12 +335,8 @@ const hoistDependencies = (
   let wasGraphChanged = false;
   const parentPkg = graphPath[graphPath.length - 1];
 
-  const sortedDepNames =
-    depNames.size === 1 || options.check !== CheckType.THOROUGH
-      ? depNames
-      : getSortedRegularDependencies(parentPkg, depNames);
   const preliminaryDecisionMap = new Map<PackageName, HoistingDecision>();
-  for (const depName of sortedDepNames) {
+  for (const depName of depNames) {
     preliminaryDecisionMap.set(depName, getHoistingDecision(graphPath, depName, priorityArray, currentPriorityDepth));
   }
 
@@ -506,7 +462,7 @@ const hoistDependencies = (
     }
   }
 
-  for (const depName of sortedDepNames) {
+  for (const depName of finalDecisions.decisionMap.keys()) {
     const dep = parentPkg.dependencies!.get(depName)!;
     const decision = finalDecisions.decisionMap.get(depName)!;
     if (decision.isHoistable === Hoistable.YES && decision.newParentIndex !== graphPath.length - 1) {
@@ -568,9 +524,13 @@ const hoistGraph = (graph: WorkGraph, options: HoistingOptions): boolean => {
     }
   }
 
-  const usages = getUsages(graph, options);
-  const children = getChildren(graph, options);
-  const priorities = getPriorities(usages, children, options);
+  const usages = getUsages(graph);
+  const children = getChildren(graph);
+  const priorities = getPriorities(usages, children);
+
+  if (options.trace) {
+    console.log(`priorities at ${printGraphPath([graph])}: ${require('util').inspect(priorities, false, null)}`);
+  }
 
   const workspaceIds = new Set<PackageId>();
   const visitWorkspace = (workspace: WorkGraph) => {
@@ -632,6 +592,11 @@ const hoistGraph = (graph: WorkGraph, options: HoistingOptions): boolean => {
         for (const depWorkspace of node.workspaces.values()) {
           const depPriorities = getPriorities(usages, getChildren(depWorkspace));
           graphPath.push(depWorkspace);
+          if (options.trace) {
+            console.log(
+              `priorities at ${printGraphPath(graphPath)}: ${require('util').inspect(depPriorities, false, null)}`
+            );
+          }
           priorityArray.push(depPriorities);
           visitParent(graphPath, priorityArray);
           priorityArray.pop();
@@ -644,6 +609,11 @@ const hoistGraph = (graph: WorkGraph, options: HoistingOptions): boolean => {
           if (dep.id !== node.id && !workspaceIds.has(dep.id) && (!dep.newParent || dep.newParent === node)) {
             const depPriorities = getPriorities(usages, getChildren(dep));
             graphPath.push(dep);
+            if (options.trace) {
+              console.log(
+                `priorities at ${printGraphPath(graphPath)}: ${require('util').inspect(depPriorities, false, null)}`
+              );
+            }
             priorityArray.push(depPriorities);
             visitParent(graphPath, priorityArray);
             priorityArray.pop();

@@ -5,12 +5,7 @@ export type HoistingPriorities = Map<PackageName, PackageId[]>;
 export type Usages = Map<PackageId, Set<PackageId>>;
 export type Children = Map<PackageId, number>;
 
-type PriorityOptions = {
-  trace?: boolean;
-};
-
-export const getUsages = (graph: WorkGraph, opts?: PriorityOptions): Usages => {
-  const options = opts || { trace: false };
+export const getUsages = (graph: WorkGraph): Usages => {
   const packageUsages = new Map();
 
   const visitDependency = (graphPath: WorkGraph[]) => {
@@ -64,15 +59,10 @@ export const getUsages = (graph: WorkGraph, opts?: PriorityOptions): Usages => {
 
   visitDependency([graph]);
 
-  if (options.trace) {
-    console.log('usages:', require('util').inspect(packageUsages, false, null));
-  }
-
   return packageUsages;
 };
 
-export const getChildren = (graph: WorkGraph, opts?: PriorityOptions): Children => {
-  const options = opts || { trace: false };
+export const getChildren = (graph: WorkGraph): Children => {
   const children = new Map();
 
   const visitDependency = (graphPath: { node: WorkGraph; isWorkspace: boolean }[]) => {
@@ -113,16 +103,10 @@ export const getChildren = (graph: WorkGraph, opts?: PriorityOptions): Children 
 
   visitDependency([{ node: graph, isWorkspace: true }]);
 
-  if (options.trace) {
-    console.log('children priorities', require('util').inspect(children, false, null));
-  }
-
   return children;
 };
 
-export const getPriorities = (usages: Usages, children: Children, opts?: PriorityOptions): HoistingPriorities => {
-  const options = opts || { trace: false };
-
+export const getPriorities = (usages: Usages, children: Children): HoistingPriorities => {
   const priorities = new Map();
 
   const pkgIds = Array.from(children.keys());
@@ -150,10 +134,6 @@ export const getPriorities = (usages: Usages, children: Children, opts?: Priorit
       priorities.set(pkgName, priorityList);
     }
     priorityList.push(pkgId);
-  }
-
-  if (options.trace) {
-    console.log('hoisting priorities', require('util').inspect(priorities, false, null));
   }
 
   return priorities;

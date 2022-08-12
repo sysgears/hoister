@@ -182,7 +182,7 @@ describe('hoist', () => {
       ],
     ]);
 
-    const finalDecisions = finalizeDependedDecisions(decisionMap, { trace: true });
+    const finalDecisions = finalizeDependedDecisions(decisionMap);
     expect(finalDecisions).toEqual({
       decisionMap: new Map([
         [
