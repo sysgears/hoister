@@ -170,14 +170,14 @@ describe('hoist', () => {
         'B' as PackageName,
         {
           isHoistable: Hoistable.LATER,
-          priorityDepth: 1,
+          queueIndex: 1,
         },
       ],
       [
         'C' as PackageName,
         {
           isHoistable: Hoistable.LATER,
-          priorityDepth: 3,
+          queueIndex: 3,
         },
       ],
     ]);
@@ -189,21 +189,21 @@ describe('hoist', () => {
           'A' as PackageName,
           {
             isHoistable: Hoistable.LATER,
-            priorityDepth: 3,
+            queueIndex: 3,
           },
         ],
         [
           'B' as PackageName,
           {
             isHoistable: Hoistable.LATER,
-            priorityDepth: 1,
+            queueIndex: 1,
           },
         ],
         [
           'C' as PackageName,
           {
             isHoistable: Hoistable.LATER,
-            priorityDepth: 3,
+            queueIndex: 3,
           },
         ],
       ]),

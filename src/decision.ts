@@ -10,7 +10,7 @@ export enum Hoistable {
 export type HoistingDecision =
   | {
       isHoistable: Hoistable.LATER;
-      priorityDepth: number;
+      queueIndex: number;
     }
   | {
       isHoistable: Hoistable.YES;
@@ -56,9 +56,9 @@ export const getHoistingDecision = (
     const newParentDep = newParentPkg.dependencies?.get(depName);
     if (newParentDep && newParentDep.id !== dep.id) {
       waterMark = idx + 1;
-      if (newParentDep.priority && waterMark !== graphPath.length - 1) {
+      if (newParentDep.queueIndex && waterMark !== graphPath.length - 1) {
         isHoistable = Hoistable.LATER;
-        priorityDepth = newParentDep.priority;
+        priorityDepth = newParentDep.queueIndex;
       } else {
         reason = `${dep.id} is blocked by a conflicting dependency ${newParentDep.id} at ${printGraphPath(
           graphPath.slice(0, idx + 1)
@@ -157,7 +157,7 @@ export const getHoistingDecision = (
   }
 
   if (isHoistable === Hoistable.LATER) {
-    return { isHoistable, priorityDepth };
+    return { isHoistable, queueIndex: priorityDepth };
   } else if (isHoistable === Hoistable.DEPENDS) {
     const result: HoistingDecision = { isHoistable, dependsOn, newParentIndex };
     if (reason) {
@@ -244,7 +244,7 @@ export const finalizeDependedDecisions = (
         if (dependeeDecision) {
           if (dependeeDecision.isHoistable === Hoistable.LATER) {
             isHoistable = Hoistable.LATER;
-            priorityDepth = Math.max(priorityDepth, dependeeDecision.priorityDepth);
+            priorityDepth = Math.max(priorityDepth, dependeeDecision.queueIndex);
           } else if (isHoistable !== Hoistable.LATER) {
             if (dependeeDecision.isHoistable === Hoistable.YES) {
               isHoistable = Hoistable.YES;
@@ -260,7 +260,7 @@ export const finalizeDependedDecisions = (
       if (isHoistable !== Hoistable.DEPENDS || newParentIndex > originalDecision.newParentIndex) {
         let finalDecision: HoistingDecision;
         if (isHoistable === Hoistable.LATER) {
-          finalDecision = { isHoistable, priorityDepth };
+          finalDecision = { isHoistable, queueIndex: priorityDepth };
         } else if (isHoistable === Hoistable.YES) {
           finalDecision = { isHoistable, newParentIndex };
           if (reason) {

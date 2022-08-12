@@ -46,7 +46,7 @@ export type WorkGraph = {
   workspaces?: Map<PackageName, WorkGraph>;
   peerNames?: Map<PackageName, Route | null>;
   packageType?: PackageType;
-  priority?: number;
+  queueIndex?: number;
   wall?: Set<PackageName>;
   originalParent?: WorkGraph;
   newParent?: WorkGraph;
@@ -323,7 +323,7 @@ type HoistingQueue = Array<QueueElement[]>;
 const hoistDependencies = (
   graphPath: WorkGraph[],
   priorityArray: HoistingPriorities[],
-  currentPriorityDepth: number,
+  queueIndex: number,
   depNames: Set<PackageName>,
   options: HoistingOptions,
   hoistingQueue: HoistingQueue
@@ -333,12 +333,12 @@ const hoistDependencies = (
 
   const preliminaryDecisionMap = new Map<PackageName, HoistingDecision>();
   for (const depName of depNames) {
-    preliminaryDecisionMap.set(depName, getHoistingDecision(graphPath, depName, priorityArray, currentPriorityDepth));
+    preliminaryDecisionMap.set(depName, getHoistingDecision(graphPath, depName, priorityArray, queueIndex));
   }
 
   if (options.trace) {
     console.log(
-      currentPriorityDepth === 0 ? 'visit' : 'revisit',
+      queueIndex === 0 ? 'visit' : 'revisit',
       graphPath.map((x) => x.id)
     );
   }
@@ -346,7 +346,7 @@ const hoistDependencies = (
   const finalDecisions = finalizeDependedDecisions(preliminaryDecisionMap, options);
 
   const hoistDependency = (dep: WorkGraph, depName: PackageName, newParentIndex: number) => {
-    delete dep.priority;
+    delete dep.queueIndex;
     const rootPkg = graphPath[newParentIndex];
     for (let idx = newParentIndex; idx < graphPath.length - 1; idx++) {
       const pkg = graphPath[idx];
@@ -482,15 +482,15 @@ const hoistDependencies = (
         console.log(
           'queue',
           graphPath.map((x) => x.id).concat([dep.id]),
-          'to depth:',
-          decision.priorityDepth,
-          'cur depth:',
-          currentPriorityDepth
+          'to index:',
+          decision.queueIndex,
+          'current index:',
+          queueIndex
         );
       }
-      dep.priority = decision.priorityDepth;
+      dep.queueIndex = decision.queueIndex;
 
-      hoistingQueue![decision.priorityDepth].push({
+      hoistingQueue![decision.queueIndex].push({
         graphPath: graphPath.slice(0),
         priorityArray: priorityArray.slice(0),
         depName,
@@ -499,7 +499,7 @@ const hoistDependencies = (
       if (options.explain && decision.reason) {
         dep.reason = decision.reason;
       }
-      delete dep.priority;
+      delete dep.queueIndex;
     }
   }
 
@@ -539,15 +539,15 @@ const hoistGraph = (graph: WorkGraph, options: HoistingOptions): boolean => {
   };
   visitWorkspace(graph);
 
-  let maxPriorityDepth = 0;
+  let maxQueueIndex = 0;
   for (const priorityIds of priorities.values()) {
-    maxPriorityDepth = Math.max(maxPriorityDepth, priorityIds.length);
+    maxQueueIndex = Math.max(maxQueueIndex, priorityIds.length);
   }
   const hoistingQueue: HoistingQueue = [];
-  for (let idx = 0; idx < maxPriorityDepth; idx++) {
+  for (let idx = 0; idx < maxQueueIndex; idx++) {
     hoistingQueue.push([]);
   }
-  let priorityDepth = 0;
+  let queueIndex = 0;
 
   const visitParent = (graphPath: WorkGraph[], priorityArray: HoistingPriorities[]) => {
     const node = graphPath[graphPath.length - 1];
@@ -581,7 +581,7 @@ const hoistGraph = (graph: WorkGraph, options: HoistingOptions): boolean => {
       }
 
       if (dependencies.size > 0) {
-        if (hoistDependencies(graphPath, priorityArray, priorityDepth, dependencies, options, hoistingQueue)) {
+        if (hoistDependencies(graphPath, priorityArray, queueIndex, dependencies, options, hoistingQueue)) {
           wasGraphChanged = true;
         }
       }
@@ -630,9 +630,9 @@ const hoistGraph = (graph: WorkGraph, options: HoistingOptions): boolean => {
 
   visitParent([graph], [priorities]);
 
-  for (priorityDepth = 1; priorityDepth < maxPriorityDepth; priorityDepth++) {
-    while (hoistingQueue[priorityDepth].length > 0) {
-      const queueElement = hoistingQueue[priorityDepth].shift()!;
+  for (queueIndex = 1; queueIndex < maxQueueIndex; queueIndex++) {
+    while (hoistingQueue[queueIndex].length > 0) {
+      const queueElement = hoistingQueue[queueIndex].shift()!;
       const graphPath: WorkGraph[] = [];
       const priorityArray: HoistingPriorities[] = [];
       let node: WorkGraph | undefined = queueElement.graphPath[queueElement.graphPath.length - 1];
@@ -644,14 +644,7 @@ const hoistGraph = (graph: WorkGraph, options: HoistingOptions): boolean => {
       } while (node);
 
       if (
-        hoistDependencies(
-          graphPath,
-          priorityArray,
-          priorityDepth,
-          new Set([queueElement.depName]),
-          options,
-          hoistingQueue
-        )
+        hoistDependencies(graphPath, priorityArray, queueIndex, new Set([queueElement.depName]), options, hoistingQueue)
       ) {
         wasGraphChanged = true;
       }
@@ -680,7 +673,7 @@ const cloneWorkGraph = (graph: WorkGraph): WorkGraph => {
         Object.defineProperty(clonedNode, '__decoupled', { value: true });
       }
 
-      delete clonedNode.priority;
+      delete clonedNode.queueIndex;
       clonedNodes.set(node, clonedNode);
 
       if (node.workspaces) {
@@ -930,8 +923,8 @@ const print = (graph: WorkGraph): string => {
         str += Array.from(node.wall);
       }
     }
-    if (node.priority) {
-      str += ` queue: ${node.priority}`;
+    if (node.queueIndex) {
+      str += ` queue: ${node.queueIndex}`;
     }
     if (node.reason) {
       str += ` - ${node.reason}`;
