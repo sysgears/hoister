@@ -1,11 +1,13 @@
 import { getPackageName } from './parse';
 import { getHoistingDecision, finalizeDependedDecisions, Hoistable, HoistingDecision } from './decision';
 import { getChildren, getPriorities, getUsages, HoistingPriorities } from './priority';
+import { getWorkspaceIds } from './workspace';
 
 export type HoistingOptions = {
   trace?: boolean;
   check?: CheckType;
   explain?: boolean;
+  safeWorkspaces?: boolean;
 };
 
 type Route = Array<{ depName: PackageName; isWorkspaceDep: boolean }>;
@@ -40,6 +42,7 @@ export type Graph = {
 
 export type WorkGraph = {
   id: PackageId;
+  hoistingPrioriries: HoistingPriorities;
   tags?: Map<string, Set<string>>;
   dependencies?: Map<PackageName, WorkGraph>;
   lookupUsages?: Map<WorkGraph, Set<PackageName>>;
@@ -56,7 +59,7 @@ export type WorkGraph = {
 };
 
 const cloneNode = (node: WorkGraph): WorkGraph => {
-  const clone: WorkGraph = { id: node.id };
+  const clone: WorkGraph = { id: node.id, hoistingPrioriries: node.hoistingPrioriries };
 
   if (node.packageType) {
     clone.packageType = node.packageType;
@@ -97,7 +100,7 @@ const cloneNode = (node: WorkGraph): WorkGraph => {
 const getAliasedId = (pkg: Graph): PackageId =>
   !pkg.alias ? (pkg.id as PackageId) : (`${pkg.alias}@>${pkg.id}` as PackageId);
 
-const fromAliasedId = (aliasedId: PackageId): { alias?: PackageName; id: PackageId } => {
+export const fromAliasedId = (aliasedId: PackageId): { alias?: PackageName; id: PackageId } => {
   const alias = getPackageName(aliasedId);
   const idIndex = aliasedId.indexOf('@>', alias.length);
   return idIndex < 0 ? { id: aliasedId } : { alias, id: aliasedId.substring(idIndex + 2) as PackageId };
@@ -167,6 +170,7 @@ const populateImplicitPeers = (graph: WorkGraph) => {
 export const toWorkGraph = (rootPkg: Graph): WorkGraph => {
   const graph: WorkGraph = {
     id: getAliasedId(rootPkg),
+    hoistingPrioriries: new Map(),
   };
 
   Object.defineProperty(graph, '__decoupled', { value: true });
@@ -176,7 +180,7 @@ export const toWorkGraph = (rootPkg: Graph): WorkGraph => {
   const visitDependency = (pkg: Graph, parentNode: WorkGraph, { isWorkspaceDep }: { isWorkspaceDep: boolean }) => {
     const aliasedId = getAliasedId(pkg);
     const seenNode = seen.get(pkg);
-    const newNode = pkg === rootPkg ? graph : seenNode || { id: aliasedId };
+    const newNode: WorkGraph = pkg === rootPkg ? graph : seenNode || { id: aliasedId, hoistingPrioriries: new Map() };
     seen.set(pkg, newNode);
 
     if (pkg.packageType) {
@@ -228,6 +232,30 @@ export const toWorkGraph = (rootPkg: Graph): WorkGraph => {
   };
 
   visitDependency(rootPkg, graph, { isWorkspaceDep: true });
+
+  const seenNodes = new Set();
+  const usages = getUsages(graph);
+  const fillPriorities = (node: WorkGraph) => {
+    if (seenNodes.has(node)) return;
+    seenNodes.add(node);
+
+    const children = getChildren(node);
+    node.hoistingPrioriries = getPriorities(usages, children);
+
+    if (node.workspaces) {
+      for (const dep of node.workspaces.values()) {
+        fillPriorities(dep);
+      }
+    }
+
+    if (node.dependencies) {
+      for (const dep of node.dependencies.values()) {
+        fillPriorities(dep);
+      }
+    }
+  };
+
+  fillPriorities(graph);
 
   return graph;
 };
@@ -331,12 +359,11 @@ const fromWorkGraph = (graph: WorkGraph): Graph => {
   return rootPkg;
 };
 
-type QueueElement = { graphPath: WorkGraph[]; priorityArray: HoistingPriorities[]; depName: PackageName };
+type QueueElement = { graphPath: WorkGraph[]; depName: PackageName };
 type HoistingQueue = Array<QueueElement[]>;
 
 const hoistDependencies = (
   graphPath: WorkGraph[],
-  priorityArray: HoistingPriorities[],
   queueIndex: number,
   depNames: Set<PackageName>,
   options: HoistingOptions,
@@ -347,7 +374,18 @@ const hoistDependencies = (
 
   const preliminaryDecisionMap = new Map<PackageName, HoistingDecision>();
   for (const depName of depNames) {
-    preliminaryDecisionMap.set(depName, getHoistingDecision(graphPath, depName, priorityArray, queueIndex));
+    const decision = getHoistingDecision(graphPath, depName, queueIndex);
+    // if (
+    //   options.safeWorkspaces &&
+    //   decision.isHoistable !== Hoistable.LATER &&
+    //   decision.newParentIndex < lastWorkspaceIndex
+    // ) {
+    //   const workspaceId = fromAliasedId(graphPath[lastWorkspaceIndex].id).id;
+    //   const workspaceGraphPathList = workspaceUsagePaths.get(workspaceId)!;
+    //   for (const workspaceGraphPath of workspaceGraphPathList) {
+    //   }
+    // }
+    preliminaryDecisionMap.set(depName, decision);
   }
 
   if (options.trace) {
@@ -506,7 +544,6 @@ const hoistDependencies = (
 
       hoistingQueue![decision.queueIndex].push({
         graphPath: graphPath.slice(0),
-        priorityArray: priorityArray.slice(0),
         depName,
       });
     } else {
@@ -542,17 +579,6 @@ const hoistGraph = (graph: WorkGraph, options: HoistingOptions): boolean => {
     console.log(`priorities at ${printGraphPath([graph])}: ${require('util').inspect(priorities, false, null)}`);
   }
 
-  const workspaceIds = new Set<PackageId>();
-  const visitWorkspace = (workspace: WorkGraph) => {
-    workspaceIds.add(workspace.id);
-    if (workspace.workspaces) {
-      for (const dep of workspace.workspaces.values()) {
-        visitWorkspace(dep);
-      }
-    }
-  };
-  visitWorkspace(graph);
-
   let maxQueueIndex = 0;
   for (const priorityIds of priorities.values()) {
     maxQueueIndex = Math.max(maxQueueIndex, priorityIds.length);
@@ -563,7 +589,9 @@ const hoistGraph = (graph: WorkGraph, options: HoistingOptions): boolean => {
   }
   let queueIndex = 0;
 
-  const visitParent = (graphPath: WorkGraph[], priorityArray: HoistingPriorities[]) => {
+  const workspaceIds = getWorkspaceIds(graph);
+
+  const visitParent = (graphPath: WorkGraph[], lastWorkspaceIndex: number) => {
     const node = graphPath[graphPath.length - 1];
 
     if (node.dependencies) {
@@ -595,7 +623,7 @@ const hoistGraph = (graph: WorkGraph, options: HoistingOptions): boolean => {
       }
 
       if (dependencies.size > 0) {
-        if (hoistDependencies(graphPath, priorityArray, queueIndex, dependencies, options, hoistingQueue)) {
+        if (hoistDependencies(graphPath, queueIndex, dependencies, options, hoistingQueue)) {
           wasGraphChanged = true;
         }
       }
@@ -612,9 +640,7 @@ const hoistGraph = (graph: WorkGraph, options: HoistingOptions): boolean => {
                 `priorities at ${printGraphPath(graphPath)}: ${require('util').inspect(depPriorities, false, null)}`
               );
             }
-            priorityArray.push(depPriorities);
-            visitParent(graphPath, priorityArray);
-            priorityArray.pop();
+            visitParent(graphPath, lastWorkspaceIndex + 1);
             graphPath.pop();
           }
         }
@@ -622,8 +648,9 @@ const hoistGraph = (graph: WorkGraph, options: HoistingOptions): boolean => {
 
       if (node.dependencies) {
         for (const dep of node.dependencies.values()) {
-          if (dep.id !== node.id && !workspaceIds.has(dep.id) && (!dep.newParent || dep.newParent === node)) {
-            const depPriorities = getPriorities(usages, getChildren(dep));
+          const realDepId = fromAliasedId(dep.id).id;
+          if (dep.id !== node.id && !workspaceIds.has(realDepId) && (!dep.newParent || dep.newParent === node)) {
+            const depPriorities = dep.hoistingPrioriries;
             if (depPriorities.size > 0) {
               graphPath.push(dep);
               if (options.trace) {
@@ -631,9 +658,7 @@ const hoistGraph = (graph: WorkGraph, options: HoistingOptions): boolean => {
                   `priorities at ${printGraphPath(graphPath)}: ${require('util').inspect(depPriorities, false, null)}`
                 );
               }
-              priorityArray.push(depPriorities);
-              visitParent(graphPath, priorityArray);
-              priorityArray.pop();
+              visitParent(graphPath, lastWorkspaceIndex);
               graphPath.pop();
             }
           }
@@ -642,24 +667,29 @@ const hoistGraph = (graph: WorkGraph, options: HoistingOptions): boolean => {
     }
   };
 
-  visitParent([graph], [priorities]);
+  visitParent([graph], 0);
 
   for (queueIndex = 1; queueIndex < maxQueueIndex; queueIndex++) {
     while (hoistingQueue[queueIndex].length > 0) {
       const queueElement = hoistingQueue[queueIndex].shift()!;
       const graphPath: WorkGraph[] = [];
-      const priorityArray: HoistingPriorities[] = [];
       let node: WorkGraph | undefined = queueElement.graphPath[queueElement.graphPath.length - 1];
       do {
         graphPath.unshift(node);
-        const idx = queueElement.graphPath.indexOf(node);
-        priorityArray.unshift(queueElement.priorityArray[idx]);
         node = node.newParent || node.originalParent;
       } while (node);
 
-      if (
-        hoistDependencies(graphPath, priorityArray, queueIndex, new Set([queueElement.depName]), options, hoistingQueue)
-      ) {
+      // let lastWorkspaceIndex = 0;
+      // for (let idx = graphPath.length - 1; idx >= 0; idx--) {
+      //   const node = graphPath[idx];
+      //   const realId = fromAliasedId(node.id).id;
+      //   if (workspaceIds.has(realId)) {
+      //     lastWorkspaceIndex = idx;
+      //     break;
+      //   }
+      // }
+
+      if (hoistDependencies(graphPath, queueIndex, new Set([queueElement.depName]), options, hoistingQueue)) {
         wasGraphChanged = true;
       }
     }

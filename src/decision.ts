@@ -1,5 +1,4 @@
 import { PackageName, WorkGraph, printGraphPath } from './hoist';
-import { HoistingPriorities } from './priority';
 
 export enum Hoistable {
   LATER = 'LATER',
@@ -38,7 +37,6 @@ type DecisionOptions = {
 export const getHoistingDecision = (
   graphPath: WorkGraph[],
   depName: PackageName,
-  priorityArray: HoistingPriorities[],
   currentPriorityDepth: number
 ): HoistingDecision => {
   const parentPkg = graphPath[graphPath.length - 1];
@@ -80,7 +78,7 @@ export const getHoistingDecision = (
       const newParentPkg = graphPath[newParentIndex];
 
       const newParentDep = newParentPkg.dependencies?.get(depName);
-      priorityDepth = priorityArray[newParentIndex].get(depName)!.indexOf(dep.id);
+      priorityDepth = newParentPkg.hoistingPrioriries.get(depName)!.indexOf(dep.id);
       if (!newParentDep) {
         const isDepTurn = priorityDepth <= currentPriorityDepth;
         if (!isDepTurn) {
@@ -131,7 +129,7 @@ export const getHoistingDecision = (
           const peerDep = peerParent.dependencies?.get(peerName);
 
           if (peerDep) {
-            const depPriority = priorityArray[newParentIndex].get(depName)!.indexOf(dep.id);
+            const depPriority = graphPath[newParentIndex].hoistingPrioriries.get(depName)!.indexOf(dep.id);
             if (depPriority <= currentPriorityDepth) {
               if (peerParentIdx === graphPath.length - 1) {
                 // Might be a cyclic peer dependency, mark that we depend on it
