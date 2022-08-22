@@ -1,6 +1,6 @@
-import { PackageId, WorkGraph, fromAliasedId } from './hoist';
+import { PackageId, WorkGraph, fromAliasedId, GraphRoute } from './hoist';
 
-export type WorkspaceUsages = Map<PackageId, Set<WorkGraph[]>>;
+export type WorkspaceUsageRoutes = Map<PackageId, Set<GraphRoute>>;
 
 export const getWorkspaceIds = (graph: WorkGraph): Set<PackageId> => {
   const workspaceIds = new Set<PackageId>();
@@ -17,45 +17,44 @@ export const getWorkspaceIds = (graph: WorkGraph): Set<PackageId> => {
   return workspaceIds;
 };
 
-export const getPackageUsagePaths = (graph: WorkGraph, packageIds: Set<PackageId>): WorkspaceUsages => {
+export const getWorkspaceUsageRoutes = (graph: WorkGraph, packageIds: Set<PackageId>): WorkspaceUsageRoutes => {
   const usages = new Map();
   const seen = new Set();
 
-  const visitDependency = (graphPath: WorkGraph[]) => {
-    const node = graphPath[graphPath.length - 1];
+  const visitDependency = (graphRoute: GraphRoute, node: WorkGraph) => {
     const isSeen = seen.has(node);
     seen.add(node);
 
     const realId = fromAliasedId(node.id).id;
     if (packageIds.has(realId)) {
-      let usagePaths = usages.get(realId);
-      if (!usagePaths) {
-        usagePaths = new Set();
-        usages.set(realId, usagePaths);
+      let workspaceRoutes = usages.get(realId);
+      if (!workspaceRoutes) {
+        workspaceRoutes = new Set();
+        usages.set(realId, workspaceRoutes);
       }
-      usagePaths.add(graphPath);
+      workspaceRoutes.add(graphRoute);
     }
 
     if (!isSeen) {
       if (node.workspaces) {
-        for (const dep of node.workspaces.values()) {
-          graphPath.push(dep);
-          visitDependency(graphPath);
-          graphPath.pop();
+        for (const [name, dep] of node.workspaces) {
+          graphRoute.push({ isWorkspaceDep: true, name });
+          visitDependency(graphRoute, dep);
+          graphRoute.pop();
         }
       }
 
       if (node.dependencies) {
-        for (const dep of node.dependencies.values()) {
-          graphPath.push(dep);
-          visitDependency(graphPath);
-          graphPath.pop();
+        for (const [name, dep] of node.dependencies) {
+          graphRoute.push({ isWorkspaceDep: true, name });
+          visitDependency(graphRoute, dep);
+          graphRoute.pop();
         }
       }
     }
   };
 
-  visitDependency([graph]);
+  visitDependency([], graph);
 
   return usages;
 };
