@@ -187,8 +187,6 @@ export const toWorkGraph = (rootPkg: Graph): WorkGraph => {
     hoistingPrioriries: new Map(),
   };
 
-  Object.defineProperty(graph, '__decoupled', { value: true });
-
   const seen = new Map<Graph, WorkGraph>();
 
   const visitDependency = (pkg: Graph, parentNode: WorkGraph, { isWorkspaceDep }: { isWorkspaceDep: boolean }) => {
@@ -802,9 +800,6 @@ const cloneWorkGraph = (graph: WorkGraph): WorkGraph => {
 
     if (!clonedNode) {
       clonedNode = Object.assign({}, node);
-      if (node['__decoupled']) {
-        Object.defineProperty(clonedNode, '__decoupled', { value: true });
-      }
 
       delete clonedNode.queueIndex;
       clonedNodes.set(node, clonedNode);
