@@ -1309,6 +1309,43 @@ describe('hoist', () => {
     expect(hoist(graph, { check: CheckType.THOROUGH })).toEqual(hoistedGraph);
   });
 
+  it('should not hoist workspace dependency if it is not preserve-symlinks safe', () => {
+    // . -> w1 -> A@X
+    //   -> w2 -> w1 -> A@X
+    //         -> A@Y
+    //   -> w3 -> A@X
+    // should be hoisted to:
+    // . -> w1 -> A@X
+    //   -> w2 -> w1 -> A@X
+    //         -> A@Y
+    //   -> w3
+    //   -> A@X
+    const w1: Graph = { id: 'w1', dependencies: [{ id: 'A@X' }] };
+    const graph: Graph = {
+      id: '.',
+      workspaces: [
+        w1,
+        {
+          id: 'w2',
+          dependencies: [w1, { id: 'A@Y' }],
+        },
+        { id: 'w3', dependencies: [{ id: 'A@X' }] },
+      ],
+    };
+
+    const hoistedGraph: Graph = {
+      id: '.',
+      dependencies: [{ id: 'A@X' }, { id: 'w1', dependencies: [{ id: 'A@X' }] }],
+      workspaces: [
+        { id: 'w1', dependencies: [{ id: 'A@X' }] },
+        { id: 'w2', dependencies: [{ id: 'A@Y' }] },
+        { id: 'w3' },
+      ],
+    };
+
+    expect(hoist(graph, { check: CheckType.THOROUGH, preserveSymlinksSafe: true })).toEqual(hoistedGraph);
+  });
+
   it('should explain when hoisting is blocked by the parent with conflicting dependency version', () => {
     // . -> A -> B@X
     //   -> B@Y

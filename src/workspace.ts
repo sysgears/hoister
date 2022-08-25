@@ -17,7 +17,7 @@ export const getWorkspaceIds = (graph: WorkGraph): Set<PackageId> => {
   return workspaceIds;
 };
 
-export const getWorkspaceUsageRoutes = (graph: WorkGraph, packageIds: Set<PackageId>): WorkspaceUsageRoutes => {
+export const getAlternativeWorkspaceRoutes = (graph: WorkGraph, packageIds: Set<PackageId>): WorkspaceUsageRoutes => {
   const usages = new Map();
   const seen = new Set();
 
@@ -26,13 +26,13 @@ export const getWorkspaceUsageRoutes = (graph: WorkGraph, packageIds: Set<Packag
     seen.add(node);
 
     const realId = fromAliasedId(node.id).id;
-    if (packageIds.has(realId)) {
+    if (packageIds.has(realId) && graphRoute.length > 0 && !graphRoute[graphRoute.length - 1].isWorkspaceDep) {
       let workspaceRoutes = usages.get(realId);
       if (!workspaceRoutes) {
         workspaceRoutes = new Set();
         usages.set(realId, workspaceRoutes);
       }
-      workspaceRoutes.add(graphRoute);
+      workspaceRoutes.add(graphRoute.slice(0));
     }
 
     if (!isSeen) {
@@ -46,7 +46,7 @@ export const getWorkspaceUsageRoutes = (graph: WorkGraph, packageIds: Set<Packag
 
       if (node.dependencies) {
         for (const [name, dep] of node.dependencies) {
-          graphRoute.push({ isWorkspaceDep: true, name });
+          graphRoute.push({ isWorkspaceDep: false, name });
           visitDependency(graphRoute, dep);
           graphRoute.pop();
         }

@@ -1,7 +1,7 @@
 import { getPackageName } from './parse';
 import { getHoistingDecision, finalizeDependedDecisions, Hoistable, HoistingDecision } from './decision';
 import { getChildren, getPriorities, getUsages, HoistingPriorities } from './priority';
-import { getWorkspaceIds, getWorkspaceUsageRoutes, WorkspaceUsageRoutes } from './workspace';
+import { getWorkspaceIds, getAlternativeWorkspaceRoutes, WorkspaceUsageRoutes } from './workspace';
 
 export type HoistingOptions = {
   trace?: boolean;
@@ -388,6 +388,13 @@ const hoistDependencies = (
   let wasGraphChanged = false;
   const parentPkg = graphPath[graphPath.length - 1];
 
+  if (options.trace) {
+    console.log(
+      queueIndex === 0 ? 'visit' : 'revisit',
+      graphPath.map((x) => x.id)
+    );
+  }
+
   const preliminaryDecisionMap = new Map<PackageName, HoistingDecision>();
   for (const depName of depNames) {
     let decision = getHoistingDecision(graphPath, depName, queueIndex);
@@ -397,24 +404,47 @@ const hoistDependencies = (
       decision.newParentIndex < lastWorkspaceIndex
     ) {
       const workspaceId = fromAliasedId(graphPath[lastWorkspaceIndex].id).id;
-      const workspaceGraphPathList = workspaceUsageRoutes.get(workspaceId)!;
-      for (const workspaceGraphRoute of workspaceGraphPathList) {
-        const graphPathToWorkspace = getGraphPath(workspaceGraphRoute, graphPath[0]);
-        const usageGraphPath = graphPathToWorkspace.concat(graphPath.slice(lastWorkspaceIndex + 1));
-        const usageDecision = getHoistingDecision(usageGraphPath, depName, queueIndex);
-        if (usageDecision.isHoistable === Hoistable.LATER) {
-          decision = usageDecision;
-          break;
-        } else {
-          for (let idx = usageDecision.newParentIndex; idx < usageGraphPath.length; idx++) {
-            const node = usageGraphPath[idx];
-            const originalIndex = graphPath.indexOf(node);
-            if (originalIndex >= 0) {
-              if (originalIndex > decision.newParentIndex) {
-                decision.newParentIndex = originalIndex;
-                decision.reason = `dependency was not hoisted due to ${usageDecision.reason!} at alternative usage route: ${printGraphPath(
-                  usageGraphPath
-                )}`;
+      const alternativeGraphRoutes = workspaceUsageRoutes.get(workspaceId);
+      if (alternativeGraphRoutes) {
+        for (const workspaceGraphRoute of alternativeGraphRoutes) {
+          const graphPathToWorkspace = getGraphPath(workspaceGraphRoute, graphPath[0]);
+          const usageGraphPath = graphPathToWorkspace.concat(graphPath.slice(lastWorkspaceIndex + 1));
+          const usageDecision = getHoistingDecision(usageGraphPath, depName, queueIndex);
+          if (options.trace) {
+            console.log(
+              'alternative usage path:',
+              usageGraphPath.map((x) => x.id),
+              depName,
+              'decision:',
+              usageDecision
+            );
+          }
+          if (usageDecision.isHoistable === Hoistable.LATER) {
+            decision = usageDecision;
+            if (options.trace) {
+              console.log('updated decision:', decision);
+            }
+            break;
+          } else {
+            for (let idx = usageDecision.newParentIndex; idx < usageGraphPath.length; idx++) {
+              let originalIndex;
+              const node = usageGraphPath[idx];
+              for (originalIndex = graphPath.length - 1; originalIndex >= 0; originalIndex--) {
+                if (graphPath[originalIndex].id === node.id) {
+                  break;
+                }
+              }
+              if (originalIndex >= 0) {
+                if (originalIndex > decision.newParentIndex) {
+                  decision.newParentIndex = originalIndex;
+                  decision.reason = `dependency was not hoisted due to ${usageDecision.reason!} at alternative usage route: ${printGraphPath(
+                    usageGraphPath
+                  )}`;
+                  if (options.trace) {
+                    console.log('updated decision:', decision);
+                  }
+                }
+                break;
               }
             }
           }
@@ -424,13 +454,6 @@ const hoistDependencies = (
     preliminaryDecisionMap.set(depName, decision);
   }
 
-  if (options.trace) {
-    console.log(
-      queueIndex === 0 ? 'visit' : 'revisit',
-      graphPath.map((x) => x.id)
-    );
-  }
-
   const finalDecisions = finalizeDependedDecisions(preliminaryDecisionMap, options);
 
   const hoistDependency = (dep: WorkGraph, depName: PackageName, newParentIndex: number) => {
@@ -438,9 +461,12 @@ const hoistDependencies = (
     const rootPkg = graphPath[newParentIndex];
     for (let idx = newParentIndex; idx < graphPath.length - 1; idx++) {
       const pkg = graphPath[idx];
-      const rootPkgDep = pkg.dependencies!.get(depName);
+      const rootPkgDep = pkg.dependencies?.get(depName);
       if (!rootPkgDep) {
-        pkg.dependencies!.set(depName, dep);
+        if (!pkg.dependencies) {
+          pkg.dependencies = new Map();
+        }
+        pkg.dependencies.set(depName, dep);
       }
 
       if (rootPkgDep && dep.tags) {
@@ -626,9 +652,12 @@ const hoistGraph = (graph: WorkGraph, options: HoistingOptions): boolean => {
   let queueIndex = 0;
 
   const workspaceIds = getWorkspaceIds(graph);
-  let workspaceUsageRoutes;
+  let workspaceUsageRoutes: WorkspaceUsageRoutes = new Map();
   if (options.preserveSymlinksSafe) {
-    workspaceUsageRoutes = getWorkspaceUsageRoutes(graph, workspaceIds);
+    workspaceUsageRoutes = getAlternativeWorkspaceRoutes(graph, workspaceIds);
+    if (options.trace && workspaceUsageRoutes.size > 0) {
+      console.log('alternative workspace usage routes', require('util').inspect(workspaceUsageRoutes, false, null));
+    }
   }
 
   const visitParent = (graphPath: WorkGraph[], lastWorkspaceIndex: number) => {
@@ -1035,27 +1064,30 @@ const print = (graph: WorkGraph): string => {
     }
     str += '\n';
 
-    let deps: WorkGraph[] = [];
-    let workspaceCount = 0;
+    const deps: { node: WorkGraph; isWorkspaceDep: boolean }[] = [];
     if (node.workspaces) {
-      const workspaces = Array.from(node.workspaces.values());
-      workspaceCount = workspaces.length;
-      deps = deps.concat(workspaces);
+      for (const dep of node.workspaces.values()) {
+        deps.push({ node: dep, isWorkspaceDep: true });
+      }
     }
 
     if (node.dependencies) {
-      deps = deps.concat(Array.from(node.dependencies.values()).filter((x) => !x.newParent || x.newParent === node));
+      for (const dep of node.dependencies.values()) {
+        if (!dep.newParent || dep.newParent === node) {
+          deps.push({ node: dep, isWorkspaceDep: false });
+        }
+      }
     }
-    deps.sort((d1, d2) => (d2.id < d1.id ? 1 : -1));
+    deps.sort((d1, d2) => (d2.node.id < d1.node.id ? 1 : -1));
 
     for (let idx = 0; idx < deps.length; idx++) {
       const dep = deps[idx];
-      graphPath.push(dep);
+      graphPath.push(dep.node);
       const hasMoreDependencies = idx < deps.length - 1;
       str += printDependency(graphPath, {
         depPrefix: prefix + (hasMoreDependencies ? `├─` : `└─`),
         prefix: prefix + (hasMoreDependencies ? `│ ` : `  `),
-        isWorkspace: idx < workspaceCount,
+        isWorkspace: dep.isWorkspaceDep,
       });
       graphPath.pop();
     }
